@@ -124,6 +124,7 @@ import {
 import { StrokeOverlay } from "./StrokeOverlay";
 import { SceneCompositor } from "./compositors/SceneCompositor";
 import { DomBackend } from "./backends/DomBackend";
+import { RasterBackend } from "./backends/RasterBackend";
 import { PreviewRenderProvider } from "./previewRenderStore";
 import type {
   CameraPreviewMode,
@@ -1477,19 +1478,23 @@ export function TransitionCompositeView({
   adjustmentLayers,
   animationsEnabled,
   exportTileFrameBounds,
+  flattenComposition = false,
   frameScale,
   isPlaying,
   renderMode,
   sequenceStyle,
+  transitionLayers,
   transitionPreviewParts,
 }: {
   adjustmentLayers?: AdjustmentLayer[];
   animationsEnabled: boolean;
   exportTileFrameBounds?: ExportTileFrameBounds;
+  flattenComposition?: boolean;
   frameScale: number;
   isPlaying: boolean;
   renderMode: "preview" | "export";
   sequenceStyle: TransitionSequenceStyle | undefined;
+  transitionLayers?: TransitionLayer[];
   transitionPreviewParts: {
     from: Array<{ part: Part; start: number; previewTime: number }>;
     to: Array<{ part: Part; start: number; previewTime: number }>;
@@ -1530,12 +1535,14 @@ export function TransitionCompositeView({
           adjustment={fromAdjustment}
           animationsEnabled={animationsEnabled}
           exportTileFrameBounds={exportTileFrameBounds}
+          flattenComposition={flattenComposition}
           frameScale={frameScale}
           isPlaying={isPlaying}
           parts={transitionPreviewParts.from}
           renderMode={renderMode}
           sceneTime={transitionPreviewParts.fromSceneTime}
           sequenceKey="from"
+          transitionLayers={transitionLayers}
         />
       </div>
       <div
@@ -1549,12 +1556,14 @@ export function TransitionCompositeView({
           adjustment={toAdjustment}
           animationsEnabled={animationsEnabled}
           exportTileFrameBounds={exportTileFrameBounds}
+          flattenComposition={flattenComposition}
           frameScale={frameScale}
           isPlaying={isPlaying}
           parts={transitionPreviewParts.to}
           renderMode={renderMode}
           sceneTime={transitionPreviewParts.toSceneTime}
           sequenceKey="to"
+          transitionLayers={transitionLayers}
         />
       </div>
     </div>
@@ -1565,22 +1574,26 @@ function TimelineSequenceView({
   adjustment,
   animationsEnabled,
   exportTileFrameBounds,
+  flattenComposition,
   frameScale,
   isPlaying,
   parts,
   renderMode,
   sceneTime,
   sequenceKey,
+  transitionLayers,
 }: {
   adjustment: ReturnType<typeof applyAdjustmentLayersToVisualStyle>;
   animationsEnabled: boolean;
   exportTileFrameBounds?: ExportTileFrameBounds;
+  flattenComposition: boolean;
   frameScale: number;
   isPlaying: boolean;
   parts: Array<{ part: Part; start: number; previewTime: number }>;
   renderMode: "preview" | "export";
   sceneTime: number;
   sequenceKey: string;
+  transitionLayers?: TransitionLayer[];
 }) {
   const visualStyle = { filter: adjustment.filter } as CSSProperties;
   return (
@@ -1590,12 +1603,14 @@ function TimelineSequenceView({
           key={`${sequenceKey}:${item.part.id}:${item.start}`}
           animationsEnabled={animationsEnabled}
           exportTileFrameBounds={exportTileFrameBounds}
+          flattenComposition={flattenComposition}
           frameScale={frameScale}
           isPlaying={isPlaying}
           part={item.part}
           previewTime={item.previewTime}
           renderClockSceneTime={sceneTime}
           renderMode={renderMode}
+          transitionLayers={transitionLayers}
         />
       ))}
       {adjustment.overlays?.map((overlay) => (
@@ -1633,25 +1648,30 @@ function noopTextDoubleClick() {}
 function TimelineSequenceCompositionItem({
   animationsEnabled,
   exportTileFrameBounds,
+  flattenComposition,
   frameScale,
   isPlaying,
   part,
   previewTime,
   renderClockSceneTime,
   renderMode,
+  transitionLayers,
 }: {
   animationsEnabled: boolean;
   exportTileFrameBounds?: ExportTileFrameBounds;
+  flattenComposition: boolean;
   frameScale: number;
   isPlaying: boolean;
   part: Part;
   previewTime: number;
   renderClockSceneTime: number;
   renderMode: "preview" | "export";
+  transitionLayers?: TransitionLayer[];
 }) {
   const hostRef = useRef<HTMLDivElement | null>(null);
+  const Backend = flattenComposition ? RasterBackend : DomBackend;
   return (
-    <DomBackend
+    <Backend
       active={false}
       animationsEnabled={animationsEnabled}
       canSelect={false}
@@ -1667,6 +1687,7 @@ function TimelineSequenceCompositionItem({
       part={part}
       renderClockSceneTime={renderClockSceneTime}
       renderMode={renderMode}
+      transitionLayers={flattenComposition ? transitionLayers : undefined}
       onObjectPointerDown={noopObjectPointerDown}
       onTextEditCommit={noopTextEditCommit}
       onTextObjectDoubleClick={noopTextDoubleClick}

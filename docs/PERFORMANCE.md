@@ -95,6 +95,16 @@ imperatively through `PreviewRenderScheduler` ticks. Anything time-dependent in
 the GPU post-process plan must derive from the tick's rendered time, not from a
 stale React prop captured when playback started.
 
+Direct visible output must stay on the mounted GPU host through transition
+boundaries. DOM transition composition is for non-flattened authoring views only;
+flattened Direct output routes through `DirectCompositionGpuHost` ->
+`CompositionRenderer`.
+
+CSS-only Direct transitions (fade/swipe/zoom/scale) use one WebGPU renderer with
+two `CompositionSceneInput`s and a GPU A/B composite node. Post-process Direct
+transitions (Film Burn, Light Leak Bands) stay on the post-process path and
+update TSL uniforms rather than remounting the transition composite.
+
 - Compute Direct post-process scene time from the rendered local time
   (`localTime - liveLocalTimeOffset`) before calling `computePostProcessPlan`.
 - Do not put per-frame values such as VHS `time` into a WebGPU node signature.
@@ -106,6 +116,9 @@ stale React prop captured when playback started.
   scheduler emits `play-tick` only while playing, so the subscription itself
   should not be gated on an `isPlaying` prop that may update after playback
   starts.
+- In Direct transitions, use current scene time for transition progress and
+  post-process uniforms; use the derived from/to scene times only to select the
+  two source frames.
 
 ## Strategy decisions
 
@@ -143,7 +156,7 @@ CPU profile spike with concentrated self time in `node:events` and no JS parent 
 - `src/components/preview/scheduler/usePreviewRenderScheduler.ts` — preview rAF owner
 - `src/components/preview/strategies/selectPreviewStrategy.ts` — pure strategy decision
 - `src/components/preview/passes/usePostProcessPlan.ts` — single-shot plan compute
-- `src/components/preview/three/CompositionWebGLHost.tsx` — Direct GPU scheduler bridge
+- `src/components/preview/three/DirectCompositionGpuHost.tsx` — Direct GPU scheduler bridge
 - `src/components/preview/three/gpuPostProcessNodes.ts` — Direct GPU post-process node signatures/uniforms
 - `src/components/inspector/inspectorRegistry.ts` — per-type dispatch
 - `src/render-engine/renderClock.ts` — CSS / Web Animations playhead sync

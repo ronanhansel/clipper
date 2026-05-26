@@ -30,7 +30,10 @@ import type {
   ComposeAuthorViewState,
 } from "../three/ComposeAuthorView";
 import type { PreviewFps } from "../../../core/previewFps";
+import { getActiveTransitionLayers } from "../../../core/transitions";
 import { renderScenePreview } from "../render/sceneRender";
+import { canUseGpuTransitionComposite } from "../three/gpuTransitionCompositeNodes";
+import { DirectCompositionGpuHost } from "../three/DirectCompositionGpuHost";
 
 type SceneCompositorProps = {
   isPostProcessSource?: boolean;
@@ -188,6 +191,61 @@ export const SceneCompositor = memo(function SceneCompositor({
     }
   }
 
+  const activeTransitionLayers = getActiveTransitionLayers(
+    transitionLayers,
+    displaySceneTime,
+  );
+  const directGpuTransitionLayer =
+    activeTransitionLayers.find(canUseGpuTransitionComposite) ?? null;
+  const useDomTransitionComposite = shouldUseDomTransitionComposite({
+    flattenComposition,
+    hasTransitionPreviewParts: Boolean(transitionPreviewParts),
+    transitionProgress,
+  });
+  const useDirectGpuTransitionComposite = shouldUseDirectGpuTransitionComposite(
+    {
+      flattenComposition,
+      hasTransitionPreviewParts: Boolean(transitionPreviewParts),
+      hasGpuTransitionComposite: Boolean(directGpuTransitionLayer),
+      hasTransitionPostProcessPasses: Boolean(
+        transitionSequenceStyle?.postProcessPasses?.length,
+      ),
+      transitionProgress,
+      fromPartCount: transitionPreviewParts?.from.length ?? 0,
+      toPartCount: transitionPreviewParts?.to.length ?? 0,
+    },
+  );
+  const directGpuStackPart =
+    flattenComposition && stackPreviewParts.length === 1
+      ? stackPreviewParts[0]
+      : null;
+  const directGpuHostPart =
+    useDirectGpuTransitionComposite &&
+    transitionPreviewParts &&
+    directGpuTransitionLayer
+      ? transitionPreviewParts.from[0]
+      : directGpuStackPart;
+  const directGpuTransitionComposite =
+    useDirectGpuTransitionComposite &&
+    transitionPreviewParts &&
+    directGpuTransitionLayer
+      ? {
+          layer: directGpuTransitionLayer,
+          progress: transitionProgress ?? 0,
+          sceneTime: displaySceneTime,
+          from: {
+            part: transitionPreviewParts.from[0].part,
+            localTime: transitionPreviewParts.from[0].previewTime,
+            sceneTime: transitionPreviewParts.fromSceneTime,
+          },
+          to: {
+            part: transitionPreviewParts.to[0].part,
+            localTime: transitionPreviewParts.to[0].previewTime,
+            sceneTime: transitionPreviewParts.toSceneTime,
+          },
+        }
+      : null;
+
   return (
     <div
       className="absolute inset-0 origin-center"
@@ -207,16 +265,39 @@ export const SceneCompositor = memo(function SceneCompositor({
         }}
       >
         <FramePreviewRenderBoundary filePath={filePath} resetKey={resetKey}>
-          {transitionPreviewParts && transitionProgress !== null ? (
+          {directGpuHostPart ? (
+            <DirectCompositionGpuHost
+              part={directGpuHostPart.part}
+              localTime={directGpuHostPart.previewTime}
+              backendProps={{
+                animationsEnabled,
+                frameScale,
+                previewFps,
+                hideNullObjects,
+                isPlaying,
+                duration: directGpuHostPart.part.duration,
+                renderClockSceneTime:
+                  directGpuTransitionComposite?.from.sceneTime ??
+                  displaySceneTime,
+                renderMode,
+                exportTileFrameBounds,
+              }}
+              adjustmentLayers={adjustmentLayers}
+              transitionLayers={transitionLayers}
+              transitionComposite={directGpuTransitionComposite}
+            />
+          ) : useDomTransitionComposite ? (
             <TransitionCompositeView
               adjustmentLayers={adjustmentLayers}
               animationsEnabled={animationsEnabled}
               exportTileFrameBounds={exportTileFrameBounds}
+              flattenComposition={false}
               frameScale={frameScale}
               isPlaying={isPlaying}
               renderMode={renderMode}
               sequenceStyle={transitionSequenceStyle}
-              transitionPreviewParts={transitionPreviewParts}
+              transitionLayers={transitionLayers}
+              transitionPreviewParts={transitionPreviewParts!}
             />
           ) : (
             stackPreviewParts.map((item) => (
@@ -271,3 +352,51 @@ export const SceneCompositor = memo(function SceneCompositor({
     </div>
   );
 });
+
+export function shouldUseDomTransitionComposite(input: {
+  flattenComposition: boolean;
+  hasTransitionPreviewParts: boolean;
+  transitionProgress: number | null;
+}) {
+  return (
+    !input.flattenComposition &&
+    input.hasTransitionPreviewParts &&
+    input.transitionProgress !== null
+  );
+}
+
+export function shouldUseRenderedLayerTransitionComposite(input: {
+  flattenComposition: boolean;
+  hasTransitionPreviewParts: boolean;
+  hasGpuTransitionComposite: boolean;
+  hasTransitionPostProcessPasses: boolean;
+  transitionProgress: number | null;
+}) {
+  return (
+    input.flattenComposition &&
+    input.hasTransitionPreviewParts &&
+    input.transitionProgress !== null &&
+    input.hasGpuTransitionComposite &&
+    !input.hasTransitionPostProcessPasses
+  );
+}
+
+export function shouldUseDirectGpuTransitionComposite(input: {
+  flattenComposition: boolean;
+  hasTransitionPreviewParts: boolean;
+  hasGpuTransitionComposite: boolean;
+  hasTransitionPostProcessPasses: boolean;
+  transitionProgress: number | null;
+  fromPartCount: number;
+  toPartCount: number;
+}) {
+  return (
+    input.flattenComposition &&
+    input.hasTransitionPreviewParts &&
+    input.transitionProgress !== null &&
+    input.hasGpuTransitionComposite &&
+    !input.hasTransitionPostProcessPasses &&
+    input.fromPartCount === 1 &&
+    input.toPartCount === 1
+  );
+}

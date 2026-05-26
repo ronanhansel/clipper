@@ -77,7 +77,7 @@ export const DomBackend: CompositionBackend = function DomBackend({
 
   // Live scrub from the inspector dispatches `clipper:camera-preview`
   // with the next CameraObjectProps. Mirror the imperative pattern from
-  // `CompositionWebGLHost` / `ComposeAuthorView`: rAF-coalesce so we
+  // `DirectCompositionGpuHost` / `ComposeAuthorView`: rAF-coalesce so we
   // commit at most once per frame, and clear on commit (`part` identity
   // changes when the document state updates).
   const [previewCameraOverride, setPreviewCameraOverride] =

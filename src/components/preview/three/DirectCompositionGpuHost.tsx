@@ -24,6 +24,11 @@ import {
   isMasterClockLive,
 } from "../../../app/features/playback/playbackTimeStore";
 import {
+  getTransitionFinishTime,
+  getTransitionMarkerTime,
+  getTransitionProgress,
+} from "../../../core/transitions";
+import {
   FRAME_HEIGHT,
   FRAME_WIDTH,
   type AdjustmentLayer,
@@ -35,7 +40,23 @@ import { defaultPreviewFps } from "../../../core/previewFps";
 import type { CompositionBackendProps } from "../backends/CompositionBackend";
 import { useOptionalPreviewRenderScheduler } from "../scheduler/PreviewRenderSchedulerContext";
 
-export interface CompositionWebGLHostProps {
+export type DirectGpuTransitionComposite = {
+  layer: TransitionLayer;
+  progress: number;
+  sceneTime: number;
+  from: {
+    part: CompositionClip;
+    localTime: number;
+    sceneTime: number;
+  };
+  to: {
+    part: CompositionClip;
+    localTime: number;
+    sceneTime: number;
+  };
+};
+
+export interface DirectCompositionGpuHostProps {
   part: CompositionClip;
   localTime: number;
   /**
@@ -57,6 +78,7 @@ export interface CompositionWebGLHostProps {
   >;
   adjustmentLayers?: AdjustmentLayer[];
   transitionLayers?: TransitionLayer[];
+  transitionComposite?: DirectGpuTransitionComposite | null;
   hostClassName?: string;
 }
 
@@ -77,7 +99,7 @@ const SOURCE_INNER_STYLE: React.CSSProperties = {
 };
 
 /**
- * `CompositionWebGLHost` mounts a `CompositionRenderer` (through-camera
+ * `DirectCompositionGpuHost` mounts a `CompositionRenderer` (through-camera
  * GPU rendering with depth-only meshes + a captured-DOM colour quad) and keeps
  * it driven by the composition's active camera + localTime. Used by:
  *   - the compose-mode camera PIP
@@ -90,10 +112,11 @@ const SOURCE_INNER_STYLE: React.CSSProperties = {
  * source must remain in the DOM (not `display: none`) so layout/paint
  * runs and the capture path can read pixels.
  */
-export function CompositionWebGLHost(props: CompositionWebGLHostProps) {
+export function DirectCompositionGpuHost(props: DirectCompositionGpuHostProps) {
   const { part, localTime, backendProps } = props;
   const hostRef = useRef<HTMLDivElement | null>(null);
   const sourceContainerRef = useRef<HTMLDivElement | null>(null);
+  const transitionSourceContainerRef = useRef<HTMLDivElement | null>(null);
   const rendererRef = useRef<CompositionRenderer | null>(null);
   const composerPassSignatureRef = useRef("");
   const pendingCameraPreviewRef = useRef<CameraObjectProps | null>(null);
@@ -103,6 +126,8 @@ export function CompositionWebGLHost(props: CompositionWebGLHostProps) {
   const [captureCanvas, setCaptureCanvas] = useState<HTMLCanvasElement | null>(
     null,
   );
+  const [transitionCaptureCanvas, setTransitionCaptureCanvas] =
+    useState<HTMLCanvasElement | null>(null);
   // Code-object bundles compile asynchronously. While the bundle is
   // still building, the sealed source DOM renders a "code: compiling…"
   // placeholder; once compilation finishes the runtime bumps a tick
@@ -116,6 +141,16 @@ export function CompositionWebGLHost(props: CompositionWebGLHostProps) {
     getCodeObjectComponentTick,
   );
   const liveLocalTimeOffset = localTime - backendProps.renderClockSceneTime;
+  const transitionFromLocalTimeOffset =
+    props.transitionComposite == null
+      ? 0
+      : props.transitionComposite.from.localTime -
+        props.transitionComposite.from.sceneTime;
+  const transitionToLocalTimeOffset =
+    props.transitionComposite == null
+      ? 0
+      : props.transitionComposite.to.localTime -
+        props.transitionComposite.to.sceneTime;
   const renderPreviewFps = backendProps.previewFps ?? defaultPreviewFps;
 
   function renderAtTime(
@@ -154,6 +189,74 @@ export function CompositionWebGLHost(props: CompositionWebGLHostProps) {
     renderer.render();
   }
 
+  function renderTransitionAtSceneTime(
+    renderer: CompositionRenderer,
+    sceneTime: number,
+    options: { syncShadows?: boolean; isPlaying?: boolean } = {},
+  ) {
+    const composite = props.transitionComposite;
+    if (!composite) {
+      renderAtTime(renderer, localTime, undefined, options);
+      return;
+    }
+    const progress = getTransitionProgress(sceneTime, composite.layer);
+    const transitionMidTime = getTransitionMarkerTime(composite.layer);
+    const transitionEndTime =
+      composite.layer.start + getTransitionFinishTime(composite.layer);
+    const fromSceneTime = clampNumber(
+      composite.layer.start +
+        (transitionMidTime - composite.layer.start) * progress,
+      composite.layer.start,
+      Math.max(transitionMidTime - 0.000001, composite.layer.start),
+    );
+    const toSceneTime = clampNumber(
+      transitionMidTime + (transitionEndTime - transitionMidTime) * progress,
+      transitionMidTime,
+      transitionEndTime,
+    );
+    const fromLocalTime =
+      Math.round(
+        (fromSceneTime + transitionFromLocalTimeOffset) * renderPreviewFps,
+      ) / renderPreviewFps;
+    const toLocalTime =
+      Math.round(
+        (toSceneTime + transitionToLocalTimeOffset) * renderPreviewFps,
+      ) / renderPreviewFps;
+    const fromCamera = getActiveCameraObjectProps(
+      composite.from.part,
+      fromLocalTime,
+    );
+    const toCamera = getActiveCameraObjectProps(composite.to.part, toLocalTime);
+    const postProcessPasses = computePostProcessPlan(
+      sceneTime,
+      props.adjustmentLayers,
+      { transitionLayers: props.transitionLayers },
+      { width: FRAME_WIDTH, height: FRAME_HEIGHT },
+    ).livePasses;
+    renderer.setGpuPostProcessPasses(postProcessPasses);
+    renderer.setTransitionComposition({
+      from: {
+        part: composite.from.part,
+        localTime: fromLocalTime,
+        sourceElement: sourceContainerRef.current,
+        camera: fromCamera,
+      },
+      to: {
+        part: composite.to.part,
+        localTime: toLocalTime,
+        sourceElement: transitionSourceContainerRef.current,
+        camera: toCamera,
+      },
+      layer: composite.layer,
+      progress,
+      options: {
+        isPlaying: options.isPlaying === true,
+        syncShadows: options.syncShadows,
+      },
+    });
+    renderer.render();
+  }
+
   // The capture canvas + source subtree live in a fresh `<div>` mounted
   // straight on `document.body`. Two reasons:
   //   1. The source must escape ancestors with `transform`,
@@ -167,7 +270,7 @@ export function CompositionWebGLHost(props: CompositionWebGLHostProps) {
   useEffect(() => {
     if (typeof document === "undefined") return;
     const target = document.createElement("div");
-    target.dataset.clipperCompositionWebglSourceHost = "";
+    target.dataset.clipperCompositionGpuSourceHost = "";
     Object.assign(target.style, {
       position: "fixed",
       top: "0px",
@@ -209,6 +312,7 @@ export function CompositionWebGLHost(props: CompositionWebGLHostProps) {
         backendSelection.reason;
       rendererRef.current = null;
       setCaptureCanvas(null);
+      setTransitionCaptureCanvas(null);
       return;
     }
     const renderer = new CompositionRenderer({
@@ -223,6 +327,7 @@ export function CompositionWebGLHost(props: CompositionWebGLHostProps) {
     // it doesn't paint anywhere visible — only its DOM position
     // matters for the `drawElementImage(child)` requirement.
     const captureCanvasEl = renderer.captureCanvas;
+    const transitionCaptureCanvasEl = renderer.transitionCaptureCanvas;
     Object.assign(captureCanvasEl.style, {
       position: "absolute",
       top: "0px",
@@ -231,8 +336,18 @@ export function CompositionWebGLHost(props: CompositionWebGLHostProps) {
       height: `${FRAME_HEIGHT}px`,
       pointerEvents: "none",
     } as Partial<CSSStyleDeclaration>);
+    Object.assign(transitionCaptureCanvasEl.style, {
+      position: "absolute",
+      top: "0px",
+      left: "0px",
+      width: `${FRAME_WIDTH}px`,
+      height: `${FRAME_HEIGHT}px`,
+      pointerEvents: "none",
+    } as Partial<CSSStyleDeclaration>);
     portalTarget.appendChild(captureCanvasEl);
+    portalTarget.appendChild(transitionCaptureCanvasEl);
     setCaptureCanvas(captureCanvasEl);
+    setTransitionCaptureCanvas(transitionCaptureCanvasEl);
 
     // Enable Chromium's experimental layoutsubtree flag eagerly so the
     // first `drawElementImage` call in the rAF effect below succeeds.
@@ -255,14 +370,24 @@ export function CompositionWebGLHost(props: CompositionWebGLHostProps) {
       /* alt casing */
     }
 
-    renderAtTime(renderer, localTime);
+    if (props.transitionComposite) {
+      renderTransitionAtSceneTime(
+        renderer,
+        props.transitionComposite.sceneTime,
+      );
+    } else {
+      renderAtTime(renderer, localTime);
+    }
 
     return () => {
       rendererRef.current = null;
       composerPassSignatureRef.current = "";
       setCaptureCanvas(null);
+      setTransitionCaptureCanvas(null);
       if (captureCanvasEl.parentNode === portalTarget)
         portalTarget.removeChild(captureCanvasEl);
+      if (transitionCaptureCanvasEl.parentNode === portalTarget)
+        portalTarget.removeChild(transitionCaptureCanvasEl);
       if (renderer.hostRoot.parentNode === host)
         host.removeChild(renderer.hostRoot);
       renderer.dispose();
@@ -288,12 +413,23 @@ export function CompositionWebGLHost(props: CompositionWebGLHostProps) {
     const handle = requestAnimationFrame(() => {
       const r = rendererRef.current;
       if (!r) return;
-      renderAtTime(r, localTime);
+      if (props.transitionComposite && transitionCaptureCanvas) {
+        renderTransitionAtSceneTime(r, props.transitionComposite.sceneTime);
+      } else {
+        renderAtTime(r, localTime);
+      }
     });
     return () => cancelAnimationFrame(handle);
     // renderAtTime closes over current part/localTime inputs.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [part, localTime, captureCanvas, codeComponentTick]);
+  }, [
+    part,
+    localTime,
+    captureCanvas,
+    transitionCaptureCanvas,
+    codeComponentTick,
+    props.transitionComposite,
+  ]);
 
   useEffect(() => {
     if (!captureCanvas) return;
@@ -306,6 +442,12 @@ export function CompositionWebGLHost(props: CompositionWebGLHostProps) {
         : localTime;
       const nextLocalTime =
         Math.round(rawLocalTime * renderPreviewFps) / renderPreviewFps;
+      if (props.transitionComposite && transitionCaptureCanvas) {
+        renderTransitionAtSceneTime(renderer, snap.adjustedSceneTime, {
+          isPlaying: true,
+        });
+        return;
+      }
       const cameraOverride = pendingCameraPreviewRef.current;
       pendingCameraPreviewRef.current = null;
       renderAtTime(renderer, nextLocalTime, cameraOverride, {
@@ -323,6 +465,8 @@ export function CompositionWebGLHost(props: CompositionWebGLHostProps) {
     part,
     renderPreviewFps,
     scheduler,
+    props.transitionComposite,
+    transitionCaptureCanvas,
   ]);
 
   useEffect(() => {
@@ -392,14 +536,14 @@ export function CompositionWebGLHost(props: CompositionWebGLHostProps) {
       <div
         ref={hostRef}
         className={props.hostClassName ?? "absolute inset-0"}
-        data-clipper-composition-webgl
+        data-clipper-composition-gpu
         style={{ pointerEvents: "none" }}
       />
       {captureCanvas
         ? createPortal(
             <div
               ref={sourceContainerRef}
-              data-clipper-composition-webgl-source
+              data-clipper-composition-gpu-source
               aria-hidden="true"
               inert={true}
               style={SOURCE_INNER_STYLE}
@@ -433,6 +577,50 @@ export function CompositionWebGLHost(props: CompositionWebGLHostProps) {
             captureCanvas,
           )
         : null}
+      {transitionCaptureCanvas
+        ? createPortal(
+            <div
+              ref={transitionSourceContainerRef}
+              data-clipper-composition-gpu-source="transition-to"
+              aria-hidden="true"
+              inert={true}
+              style={SOURCE_INNER_STYLE}
+            >
+              <DomBackend
+                active={false}
+                activeShapeTool={null}
+                animationsEnabled={backendProps.animationsEnabled}
+                canSelect={false}
+                cameraHandledExternally={true}
+                duration={
+                  props.transitionComposite?.to.part.duration ??
+                  backendProps.duration
+                }
+                editingTextObjectId={null}
+                exportTileFrameBounds={backendProps.exportTileFrameBounds}
+                focusPicking={false}
+                frameScale={1}
+                previewFps={backendProps.previewFps}
+                hideNullObjects={backendProps.hideNullObjects ?? false}
+                hostRef={transitionSourceContainerRef}
+                isPlaying={backendProps.isPlaying}
+                localTime={props.transitionComposite?.to.localTime ?? localTime}
+                part={props.transitionComposite?.to.part ?? part}
+                renderClockSceneTime={
+                  props.transitionComposite?.to.sceneTime ??
+                  backendProps.renderClockSceneTime
+                }
+                renderMode={backendProps.renderMode}
+                onObjectPointerDown={NOOP_OBJECT_POINTER}
+                onObjectContextMenu={undefined}
+                onTextEditCommit={NOOP_TEXT_COMMIT}
+                onTextEditEnd={undefined}
+                onTextObjectDoubleClick={NOOP_OBJECT_DOUBLE_CLICK}
+              />
+            </div>,
+            transitionCaptureCanvas,
+          )
+        : null}
     </>
   );
 }
@@ -442,4 +630,8 @@ function disposeComposerPasses(passes: readonly any[]) {
   for (const pass of passes) {
     if (typeof pass.dispose === "function") pass.dispose();
   }
+}
+
+function clampNumber(value: number, min: number, max: number) {
+  return Math.min(Math.max(value, min), max);
 }

@@ -1515,6 +1515,8 @@ function ComposeParentLinkControl({
     childLayerId: string,
   ) => void;
 }) {
+  const [parentSelectOpen, setParentSelectOpen] = useState(false);
+
   if (!layer.object) {
     return <span className="px-2 text-[11px] font-bold text-[#555d6c]">-</span>;
   }
@@ -1530,7 +1532,9 @@ function ComposeParentLinkControl({
         <PickWhipIcon />
       </span>
       <Select
+        open={parentSelectOpen}
         value={layer.object.parentId ?? "none"}
+        onOpenChange={setParentSelectOpen}
         onValueChange={(value) =>
           onSetLayerParent(layer.id, value === "none" ? "" : value)
         }
@@ -1543,16 +1547,18 @@ function ComposeParentLinkControl({
         >
           <SelectValue />
         </SelectTrigger>
-        <SelectContent>
-          <SelectGroup>
-            <SelectItem value="none">None</SelectItem>
-            {parentOptions.map((option) => (
-              <SelectItem key={option.id} value={option.id}>
-                {option.number}. {option.name}
-              </SelectItem>
-            ))}
-          </SelectGroup>
-        </SelectContent>
+        {parentSelectOpen ? (
+          <SelectContent>
+            <SelectGroup>
+              <SelectItem value="none">None</SelectItem>
+              {parentOptions.map((option) => (
+                <SelectItem key={option.id} value={option.id}>
+                  {option.number}. {option.name}
+                </SelectItem>
+              ))}
+            </SelectGroup>
+          </SelectContent>
+        ) : null}
       </Select>
     </div>
   );

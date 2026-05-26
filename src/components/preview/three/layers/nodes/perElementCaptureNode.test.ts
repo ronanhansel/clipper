@@ -14,29 +14,45 @@ import type { LayerNodeContext } from "../layerNodeRegistry";
 class FakeContext2D {
   drawElementImage:
     | ((el: unknown, x: number, y: number, w: number, h: number) => unknown)
-    | undefined;
+    | undefined = vi.fn();
   clearRect = vi.fn();
   drawImage = vi.fn();
 }
 
 class FakeCanvas {
+  readonly tagName = "CANVAS";
   width = 0;
   height = 0;
-  readonly children: FakeElement[] = [];
+  layoutSubtree = false;
+  requestPaint = vi.fn();
+  readonly children: Array<FakeCanvas | FakeElement> = [];
+  readonly style: Record<string, string> = {};
   private ctx: FakeContext2D | null = null;
-  appendChild(child: FakeElement): void {
+  appendChild(child: FakeCanvas | FakeElement): void {
     this.children.push(child);
+  }
+  remove(): void {}
+  cloneNode(_deep?: boolean): FakeCanvas {
+    const clone = new FakeCanvas();
+    clone.width = this.width;
+    clone.height = this.height;
+    clone.layoutSubtree = this.layoutSubtree;
+    return clone;
   }
   getContext(kind: string) {
     if (kind !== "2d") return null;
     if (!this.ctx) this.ctx = new FakeContext2D();
     return this.ctx;
   }
+  querySelectorAll(_selector: string): FakeCanvas[] {
+    return [];
+  }
 }
 
 class FakeElement {
+  readonly tagName = "DIV";
   private readonly attributes = new Map<string, string>();
-  private readonly children: FakeElement[] = [];
+  private readonly children: Array<FakeCanvas | FakeElement> = [];
   readonly style: Record<string, string> = {};
   setAttribute(name: string, value: string): void {
     this.attributes.set(name, value);
@@ -44,16 +60,21 @@ class FakeElement {
   getAttribute(name: string): string | null {
     return this.attributes.get(name) ?? null;
   }
-  appendChild(child: FakeElement): void {
+  appendChild(child: FakeCanvas | FakeElement): void {
     this.children.push(child);
   }
   removeAttribute(name: string): void {
     this.attributes.delete(name);
   }
   remove(): void {}
-  cloneNode(_deep?: boolean): FakeElement {
+  cloneNode(deep?: boolean): FakeElement {
     const clone = new FakeElement();
     for (const [key, value] of this.attributes) clone.setAttribute(key, value);
+    if (deep) {
+      for (const child of this.children) {
+        clone.appendChild(child.cloneNode(true));
+      }
+    }
     return clone;
   }
   querySelector(selector: string): FakeElement | null {
@@ -61,10 +82,22 @@ class FakeElement {
     if (!match) return null;
     const id = match[1];
     for (const child of this.children) {
+      if (child.tagName !== "DIV") continue;
       if (child.getAttribute("data-clipper-render-object-id") === id)
         return child;
     }
     return null;
+  }
+  querySelectorAll(selector: string): Array<FakeCanvas | FakeElement> {
+    const results: Array<FakeCanvas | FakeElement> = [];
+    const visit = (element: FakeCanvas | FakeElement) => {
+      if (selector === "canvas" && element.tagName === "CANVAS")
+        results.push(element);
+      if (element.tagName !== "DIV") return;
+      for (const child of element.children) visit(child);
+    };
+    for (const child of this.children) visit(child);
+    return results;
   }
 }
 
@@ -110,6 +143,22 @@ function makeFakeSharedCapture(): {
   const canvas = new FakeCanvas();
   const context = canvas.getContext("2d") as FakeContext2D;
   return { canvas, context };
+}
+
+function getNodeCaptureCanvas(sharedCapture: {
+  canvas: FakeCanvas;
+}): FakeCanvas {
+  const canvas = sharedCapture.canvas.children.find(
+    (child): child is FakeCanvas => child.tagName === "CANVAS",
+  );
+  if (!canvas) throw new Error("Expected node-owned capture canvas");
+  return canvas;
+}
+
+function getNodeCaptureContext(sharedCapture: {
+  canvas: FakeCanvas;
+}): FakeContext2D {
+  return getNodeCaptureCanvas(sharedCapture).getContext("2d") as FakeContext2D;
 }
 
 function makeContext(
@@ -188,6 +237,58 @@ describe("perElementCaptureNode", () => {
     expect(
       node.object3D.material.userData.layerUniformNodes.u_opacity.value,
     ).toBeCloseTo(0.35);
+    node.dispose();
+  });
+
+  it("swaps the WebGPU texture node value when capture canvas resizes", () => {
+    const factory = createPerElementCaptureFactory("code");
+    const node = factory.create({ id: "layer-1" } as FrameObject, {
+      ...makeContext(),
+      materialBackend: "webgpu-node",
+    });
+    const firstMaterial = node.object3D.material;
+    const firstTexture = firstMaterial.userData.layerTextureNode.value;
+    node.update(makeState({ bounds: { x: 0, y: 0, width: 50, height: 25 } }));
+    const material = node.object3D.material;
+    const secondTexture = material.userData.layerTextureNode.value;
+    expect(material).not.toBe(firstMaterial);
+    expect(secondTexture).toBeInstanceOf(THREE.CanvasTexture);
+    expect(secondTexture).not.toBe(firstTexture);
+    expect(material.userData.layerLightingUniforms.u_image.value).toBe(
+      secondTexture,
+    );
+    node.dispose();
+  });
+
+  it("refreshes the WebGPU texture binding after drawing DOM capture pixels", () => {
+    const sharedCapture = makeFakeSharedCapture();
+    const root = new FakeElement();
+    const layer = new FakeElement();
+    layer.setAttribute("data-clipper-render-object-id", "layer-1");
+    root.appendChild(layer);
+    const factory = createPerElementCaptureFactory("code");
+    const node = factory.create({ id: "layer-1" } as FrameObject, {
+      sharedCapture:
+        sharedCapture as unknown as LayerNodeContext["sharedCapture"],
+      sourceRoot: () => root as unknown as Element,
+      requestRender: () => {},
+      materialBackend: "webgpu-node",
+    });
+    node.update(makeState({ bounds: { x: 0, y: 0, width: 50, height: 25 } }));
+    const drawElementImage = getNodeCaptureContext(sharedCapture)
+      .drawElementImage as ReturnType<typeof vi.fn>;
+    const firstMaterial = node.object3D.material;
+    const firstTexture = firstMaterial.userData.layerTextureNode.value;
+    node.update(makeState({ bounds: { x: 0, y: 0, width: 50, height: 25 } }));
+    const material = node.object3D.material;
+    const nextTexture = material.userData.layerTextureNode.value;
+    expect(drawElementImage).toHaveBeenCalledTimes(1);
+    expect(material).not.toBe(firstMaterial);
+    expect(nextTexture).toBeInstanceOf(THREE.CanvasTexture);
+    expect(nextTexture).not.toBe(firstTexture);
+    expect(material.userData.layerLightingUniforms.u_image.value).toBe(
+      nextTexture,
+    );
     node.dispose();
   });
 
@@ -275,11 +376,9 @@ describe("perElementCaptureNode", () => {
     node.dispose();
   });
 
-  it("calls drawElementImage on the shared context when the layer subtree is found", () => {
+  it("calls drawElementImage on the node-owned capture context when the layer subtree is found", () => {
     const sharedCapture = makeFakeSharedCapture();
-    const drawElementImage = vi.fn();
     const requestRender = vi.fn();
-    sharedCapture.context.drawElementImage = drawElementImage;
     const root = new FakeElement();
     const layer = new FakeElement();
     layer.setAttribute("data-clipper-render-object-id", "layer-1");
@@ -292,6 +391,8 @@ describe("perElementCaptureNode", () => {
       requestRender,
     });
     node.update(makeState({ bounds: { x: 0, y: 0, width: 50, height: 25 } }));
+    const drawElementImage = getNodeCaptureContext(sharedCapture)
+      .drawElementImage as ReturnType<typeof vi.fn>;
     expect(drawElementImage).not.toHaveBeenCalled();
     expect(requestRender).toHaveBeenCalledTimes(1);
     node.update(makeState({ bounds: { x: 0, y: 0, width: 50, height: 25 } }));
@@ -300,10 +401,135 @@ describe("perElementCaptureNode", () => {
     node.dispose();
   });
 
+  it("copies canvas pixels into the capture clone before drawElementImage", () => {
+    const sharedCapture = makeFakeSharedCapture();
+    const root = new FakeElement();
+    const layer = new FakeElement();
+    layer.setAttribute("data-clipper-render-object-id", "layer-1");
+    const sourceCanvas = new FakeCanvas();
+    sourceCanvas.width = 40;
+    sourceCanvas.height = 20;
+    layer.appendChild(sourceCanvas);
+    root.appendChild(layer);
+    const factory = createPerElementCaptureFactory("html");
+    const node = factory.create({ id: "layer-1" } as FrameObject, {
+      sharedCapture:
+        sharedCapture as unknown as LayerNodeContext["sharedCapture"],
+      sourceRoot: () => root as unknown as Element,
+      requestRender: () => {},
+    });
+
+    node.update(makeState({ bounds: { x: 0, y: 0, width: 50, height: 25 } }));
+    node.update(makeState({ bounds: { x: 0, y: 0, width: 50, height: 25 } }));
+
+    const drawElementImage = getNodeCaptureContext(sharedCapture)
+      .drawElementImage as ReturnType<typeof vi.fn>;
+    const captured = drawElementImage.mock.calls[0]?.[0] as FakeElement;
+    const clonedCanvas = captured.querySelectorAll("canvas")[0] as FakeCanvas;
+    expect(clonedCanvas.width).toBe(40);
+    expect(clonedCanvas.height).toBe(20);
+    expect(clonedCanvas.getContext("2d")?.drawImage).toHaveBeenCalledWith(
+      sourceCanvas,
+      0,
+      0,
+    );
+    node.dispose();
+  });
+
+  it("captures code layers through the per-layer clone path", () => {
+    const sharedCapture = makeFakeSharedCapture();
+    const requestRender = vi.fn();
+    const root = new FakeElement();
+    const layer = new FakeElement();
+    layer.setAttribute("data-clipper-render-object-id", "layer-1");
+    root.appendChild(layer);
+    const factory = createPerElementCaptureFactory("code");
+    const node = factory.create({ id: "layer-1" } as FrameObject, {
+      sharedCapture:
+        sharedCapture as unknown as LayerNodeContext["sharedCapture"],
+      sourceRoot: () => root as unknown as Element,
+      requestRender,
+    });
+
+    node.update(makeState({ bounds: { x: 20, y: 30, width: 50, height: 25 } }));
+
+    const drawElementImage = getNodeCaptureContext(sharedCapture)
+      .drawElementImage as ReturnType<typeof vi.fn>;
+    expect(drawElementImage).not.toHaveBeenCalled();
+    expect(requestRender).toHaveBeenCalledTimes(1);
+    node.update(makeState({ bounds: { x: 20, y: 30, width: 50, height: 25 } }));
+    expect(drawElementImage).toHaveBeenCalledTimes(1);
+    expect(drawElementImage.mock.calls[0]?.[0]).not.toBe(root);
+    expect(drawElementImage.mock.calls[0]?.slice(1)).toEqual([0, 0, 50, 25]);
+    node.dispose();
+  });
+
+  it("prepares the per-layer capture clone before drawing it", () => {
+    const sharedCapture = makeFakeSharedCapture();
+    const root = new FakeElement();
+    const layer = new FakeElement();
+    layer.setAttribute("data-clipper-render-object-id", "layer-1");
+    root.appendChild(layer);
+    const factory = createPerElementCaptureFactory("code");
+    const node = factory.create({ id: "layer-1" } as FrameObject, {
+      sharedCapture:
+        sharedCapture as unknown as LayerNodeContext["sharedCapture"],
+      sourceRoot: () => root as unknown as Element,
+      requestRender: () => {},
+      materialBackend: "webgpu-node",
+    });
+
+    node.update(makeState({ bounds: { x: 0, y: 0, width: 50, height: 25 } }));
+
+    const captureCanvas = getNodeCaptureCanvas(sharedCapture);
+    expect(captureCanvas.layoutSubtree).toBe(true);
+    expect(captureCanvas.requestPaint).toHaveBeenCalled();
+    node.dispose();
+  });
+
+  it("keeps pending layer capture isolated from shared canvas resizes", () => {
+    const sharedCapture = makeFakeSharedCapture();
+    const root = new FakeElement();
+    const layer = new FakeElement();
+    layer.setAttribute("data-clipper-render-object-id", "layer-1");
+    root.appendChild(layer);
+    const factory = createPerElementCaptureFactory("code");
+    const node = factory.create({ id: "layer-1" } as FrameObject, {
+      sharedCapture:
+        sharedCapture as unknown as LayerNodeContext["sharedCapture"],
+      sourceRoot: () => root as unknown as Element,
+      requestRender: () => {},
+      materialBackend: "webgpu-node",
+    });
+
+    node.update(
+      makeState({ bounds: { x: 0, y: 0, width: 794, height: 1123 } }),
+    );
+    const captureCanvas = getNodeCaptureCanvas(sharedCapture);
+    const drawElementImage = captureCanvas.getContext("2d")
+      ?.drawElementImage as ReturnType<typeof vi.fn>;
+    sharedCapture.canvas.width = 564;
+    sharedCapture.canvas.height = 244;
+    node.update(
+      makeState({ bounds: { x: 0, y: 0, width: 794, height: 1123 } }),
+    );
+
+    expect(sharedCapture.canvas.width).toBe(564);
+    expect(sharedCapture.canvas.height).toBe(244);
+    expect(captureCanvas.width).toBe(794);
+    expect(captureCanvas.height).toBe(1123);
+    expect(drawElementImage).toHaveBeenCalledWith(
+      expect.any(FakeElement),
+      0,
+      0,
+      794,
+      1123,
+    );
+    node.dispose();
+  });
+
   it("does not recapture unchanged text pixels every update", () => {
     const sharedCapture = makeFakeSharedCapture();
-    const drawElementImage = vi.fn();
-    sharedCapture.context.drawElementImage = drawElementImage;
     const root = new FakeElement();
     const layer = new FakeElement();
     layer.setAttribute("data-clipper-render-object-id", "layer-1");
@@ -316,16 +542,101 @@ describe("perElementCaptureNode", () => {
       requestRender: () => {},
     });
     node.update(makeState());
+    const drawElementImage = getNodeCaptureContext(sharedCapture)
+      .drawElementImage as ReturnType<typeof vi.fn>;
     node.update(makeState());
     node.update(makeState());
     expect(drawElementImage).toHaveBeenCalledTimes(1);
     node.dispose();
   });
 
+  it("does not recapture unchanged code pixels every update", () => {
+    const sharedCapture = makeFakeSharedCapture();
+    const root = new FakeElement();
+    const layer = new FakeElement();
+    layer.setAttribute("data-clipper-render-object-id", "layer-1");
+    root.appendChild(layer);
+    const factory = createPerElementCaptureFactory("code");
+    const node = factory.create({ id: "layer-1" } as FrameObject, {
+      sharedCapture:
+        sharedCapture as unknown as LayerNodeContext["sharedCapture"],
+      sourceRoot: () => root as unknown as Element,
+      requestRender: () => {},
+    });
+    node.update(
+      makeState({
+        bounds: { x: 0, y: 0, width: 50, height: 25 },
+        props: { source: "untitled.tsx", colour: "#5cff00" },
+      }),
+    );
+    const drawElementImage = getNodeCaptureContext(sharedCapture)
+      .drawElementImage as ReturnType<typeof vi.fn>;
+    node.update(
+      makeState({
+        bounds: { x: 0, y: 0, width: 50, height: 25 },
+        props: { source: "untitled.tsx", colour: "#5cff00" },
+      }),
+    );
+    node.update(
+      makeState({
+        bounds: { x: 0, y: 0, width: 50, height: 25 },
+        props: { source: "untitled.tsx", colour: "#5cff00" },
+      }),
+    );
+    expect(drawElementImage).toHaveBeenCalledTimes(1);
+    node.dispose();
+  });
+
+  it("waits for code SVG fallback instead of retrying capture every update", () => {
+    const sharedCapture = makeFakeSharedCapture();
+    const requestRender = vi.fn();
+    const root = new FakeElement();
+    const layer = new FakeElement();
+    layer.setAttribute("data-clipper-render-object-id", "layer-1");
+    root.appendChild(layer);
+    const originalImage = (globalThis as { Image?: unknown }).Image;
+    const originalXMLSerializer = (globalThis as { XMLSerializer?: unknown })
+      .XMLSerializer;
+    class PendingImage {
+      onload: (() => void) | null = null;
+      onerror: (() => void) | null = null;
+      src = "";
+    }
+    class FakeXMLSerializer {
+      serializeToString(): string {
+        return "<div></div>";
+      }
+    }
+    (globalThis as { Image?: unknown }).Image = PendingImage;
+    (globalThis as { XMLSerializer?: unknown }).XMLSerializer =
+      FakeXMLSerializer;
+    const factory = createPerElementCaptureFactory("code");
+    const node = factory.create({ id: "layer-1" } as FrameObject, {
+      sharedCapture:
+        sharedCapture as unknown as LayerNodeContext["sharedCapture"],
+      sourceRoot: () => root as unknown as Element,
+      requestRender,
+    });
+    node.update(makeState({ bounds: { x: 0, y: 0, width: 50, height: 25 } }));
+    const drawElementImage = getNodeCaptureContext(sharedCapture)
+      .drawElementImage as ReturnType<typeof vi.fn>;
+    drawElementImage.mockImplementation(() => {
+      throw new DOMException("No cached paint record", "InvalidStateError");
+    });
+
+    node.update(makeState({ bounds: { x: 0, y: 0, width: 50, height: 25 } }));
+    node.update(makeState({ bounds: { x: 0, y: 0, width: 50, height: 25 } }));
+
+    expect(requestRender).toHaveBeenCalledTimes(1);
+    expect(drawElementImage).toHaveBeenCalledTimes(1);
+    node.dispose();
+    (globalThis as { Image?: unknown }).Image = originalImage;
+    (globalThis as { XMLSerializer?: unknown }).XMLSerializer =
+      originalXMLSerializer;
+  });
+
   it("does not recapture text pixels for opacity-only changes", () => {
     const sharedCapture = makeFakeSharedCapture();
-    const drawElementImage = vi.fn();
-    sharedCapture.context.drawElementImage = drawElementImage;
     const root = new FakeElement();
     const layer = new FakeElement();
     layer.setAttribute("data-clipper-render-object-id", "layer-1");
@@ -338,6 +649,8 @@ describe("perElementCaptureNode", () => {
       requestRender: () => {},
     });
     node.update(makeState({ style: { opacity: 1 } }));
+    const drawElementImage = getNodeCaptureContext(sharedCapture)
+      .drawElementImage as ReturnType<typeof vi.fn>;
     node.update(makeState({ style: { opacity: 0.4 } }));
     node.update(makeState({ style: { opacity: 0.4 } }));
     expect(drawElementImage).toHaveBeenCalledTimes(1);
@@ -358,9 +671,6 @@ describe("perElementCaptureNode", () => {
 
   it("warns once and does not throw when drawElementImage fails", () => {
     const sharedCapture = makeFakeSharedCapture();
-    sharedCapture.context.drawElementImage = vi.fn(() => {
-      throw new Error("boom");
-    });
     const root = new FakeElement();
     const layer = new FakeElement();
     layer.setAttribute("data-clipper-render-object-id", "layer-1");
@@ -374,6 +684,10 @@ describe("perElementCaptureNode", () => {
       requestRender: () => {},
     });
     expect(() => node.update(makeState())).not.toThrow();
+    const context = getNodeCaptureContext(sharedCapture);
+    context.drawElementImage = vi.fn(() => {
+      throw new Error("boom");
+    });
     expect(() => node.update(makeState())).not.toThrow();
     expect(warn).toHaveBeenCalledTimes(1);
     warn.mockRestore();

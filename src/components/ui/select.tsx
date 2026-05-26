@@ -232,7 +232,7 @@ export const SelectItem = forwardRef<
     }
 
     function openPreviewAfterDelay() {
-      if (!preview) return;
+      if (!previewEase) return;
       clearPreviewTimer();
       if (Date.now() - lastEasePreviewOpenTime <= easePreviewSkipDelayMs) {
         setPreviewOpen(true);

@@ -1,8 +1,12 @@
 import * as THREE from "three";
 import { MeshBasicNodeMaterial } from "three/webgpu";
 import { Fn, texture as textureNode, uniform, uv, vec4 } from "three/tsl";
+import { prepareLiveDomPostProcessSource } from "../../../../../core/effects/postprocess/liveDomCapability";
 import type { EvaluatedObjectState } from "../../../../../core/propertyRegistry";
-import type { FrameObject, FrameObjectType } from "../../../../../core/types";
+import {
+  type FrameObject,
+  type FrameObjectType,
+} from "../../../../../core/types";
 import type {
   LayerNode,
   LayerNodeContext,
@@ -87,6 +91,8 @@ type DrawElementImageContext = CanvasRenderingContext2D & {
   ) => unknown;
 };
 
+type CaptureDrawResult = "drawn" | "retry" | "deferred";
+
 function createPerElementCaptureUniforms(image: unknown, alphaCutoff: number) {
   return {
     u_image: { value: image },
@@ -168,15 +174,27 @@ function syncPerElementCaptureNodeUniforms(
   nodes.u_alphaCutoff.value = uniforms.u_alphaCutoff.value;
 }
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function configureCaptureTexture(texture: any): void {
+  texture.flipY = true;
+  texture.minFilter = THREE.LinearFilter;
+  texture.magFilter = THREE.LinearFilter;
+  // The captured pixels hold sRGB-encoded bytes from the DOM render.
+  // Mark as sRGB so Three linearises on read and the bokeh gather
+  // operates in linear-light space.
+  texture.colorSpace = THREE.SRGBColorSpace;
+  texture.needsUpdate = true;
+}
+
 class PerElementCaptureNode implements LayerNode {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   readonly object3D: any;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   private readonly mesh: any;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  private readonly material: any;
+  private material: any;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  private readonly texture: any;
+  private texture: any;
   private readonly canvas: HTMLCanvasElement;
   private readonly ctx: CanvasRenderingContext2D;
   private readonly id: string;
@@ -190,6 +208,7 @@ class PerElementCaptureNode implements LayerNode {
   private lastCaptureKey = "";
   private pendingCaptureKey = "";
   private pendingCaptureEl: HTMLElement | null = null;
+  private rasterFallbackInFlight = false;
   private warnedMissing = false;
   private readonly videoFrameCache = new Map<number, HTMLCanvasElement>();
 
@@ -209,15 +228,13 @@ class PerElementCaptureNode implements LayerNode {
     this.ctx = ctx;
 
     this.texture = new THREE.CanvasTexture(this.canvas);
-    this.texture.flipY = true;
-    this.texture.minFilter = THREE.LinearFilter;
-    this.texture.magFilter = THREE.LinearFilter;
-    // The captured pixels hold sRGB-encoded bytes from the DOM render.
-    // Mark as sRGB so Three linearises on read and the bokeh gather
-    // operates in linear-light space — same convention as the old
-    // `CapturePlaneTexture`.
-    this.texture.colorSpace = THREE.SRGBColorSpace;
-    this.texture.needsUpdate = true;
+    configureCaptureTexture(this.texture);
+    Object.assign(this.canvas.style, {
+      position: "absolute",
+      left: "0px",
+      top: "0px",
+      pointerEvents: "none",
+    } as Partial<CSSStyleDeclaration>);
 
     const alphaCutoff =
       kind === "text" ? TEXT_ALPHA_CUTOFF : DEFAULT_ALPHA_CUTOFF;
@@ -249,6 +266,13 @@ class PerElementCaptureNode implements LayerNode {
       this.captureHeight = captureHeight;
       this.canvas.width = captureWidth;
       this.canvas.height = captureHeight;
+      this.canvas.style.width = `${captureWidth}px`;
+      this.canvas.style.height = `${captureHeight}px`;
+      const previousTexture = this.texture;
+      this.texture = new THREE.CanvasTexture(this.canvas);
+      configureCaptureTexture(this.texture);
+      this.setCurrentMaterialTexture(this.texture);
+      previousTexture.dispose();
       this.mesh.geometry.dispose();
       this.mesh.geometry = new THREE.PlaneGeometry(captureWidth, captureHeight);
       this.clearPendingCapture();
@@ -270,35 +294,57 @@ class PerElementCaptureNode implements LayerNode {
       this.material,
       this.context.getLighting?.() ?? EMPTY_LAYER_LIGHTING,
     );
-
-    this.captureLayerPixels(createCaptureKey(this.kind, state));
+    this.captureLayerPixels(createCaptureKey(this.kind, state), state);
   }
 
-  private captureLayerPixels(captureKey: string): void {
+  private setCurrentMaterialTexture(texture: unknown): void {
+    if (this.context.materialBackend !== "webgpu-node") {
+      const uniforms = getPerElementCaptureUniforms(this.material);
+      uniforms.u_image.value = texture;
+      return;
+    }
+    const alphaCutoff =
+      this.kind === "text" ? TEXT_ALPHA_CUTOFF : DEFAULT_ALPHA_CUTOFF;
+    const previous = this.material;
+    this.material = createPerElementCaptureNodeMaterial(texture, alphaCutoff);
+    this.mesh.material = this.material;
+    previous.dispose();
+  }
+
+  private captureLayerPixels(
+    captureKey: string,
+    state: EvaluatedObjectState,
+  ): void {
+    if (this.pendingCaptureEl && this.rasterFallbackInFlight) return;
     if (this.pendingCaptureEl) {
-      if (!this.drawPendingCapture()) {
+      const result = this.drawPendingCapture();
+      if (result === "deferred") return;
+      if (result === "retry") {
         this.context.requestRender();
         return;
       }
     }
-    if (this.kind === "text" && captureKey === this.lastCaptureKey) return;
+    if (this.kind !== "code" && captureKey === this.lastCaptureKey) return;
     const sourceRoot = this.context.sourceRoot();
     if (!sourceRoot) return;
     const layerEl = sourceRoot.querySelector(
       `[data-clipper-render-object-id="${cssEscape(this.id)}"]`,
     );
     if (!layerEl) return;
+    const effectiveCaptureKey =
+      this.kind === "code"
+        ? `${captureKey}:${getCodeLayerDomSignature(layerEl)}`
+        : captureKey;
+    if (effectiveCaptureKey === this.lastCaptureKey) return;
 
-    const sharedCtx = this.context.sharedCapture
-      .context as DrawElementImageContext;
-    const drawElementImage = sharedCtx.drawElementImage;
+    const captureCtx = this.ctx as DrawElementImageContext;
+    const drawElementImage = captureCtx.drawElementImage;
     if (typeof drawElementImage !== "function") return;
 
     const sharedCanvas = this.context.sharedCapture.canvas;
-    if (sharedCanvas.width !== this.captureWidth)
-      sharedCanvas.width = this.captureWidth;
-    if (sharedCanvas.height !== this.captureHeight)
-      sharedCanvas.height = this.captureHeight;
+    const captureMount = sharedCanvas.parentElement ?? sharedCanvas;
+    if (this.canvas.parentNode !== captureMount)
+      captureMount.appendChild(this.canvas);
     this.clearPendingCapture();
     this.pendingCaptureEl = createCaptureClone(
       layerEl,
@@ -309,56 +355,46 @@ class PerElementCaptureNode implements LayerNode {
       this.captureHeight,
       this.videoFrameCache,
     );
-    this.pendingCaptureKey = captureKey;
-    sharedCanvas.appendChild(this.pendingCaptureEl);
+    this.pendingCaptureKey = effectiveCaptureKey;
+    this.canvas.appendChild(this.pendingCaptureEl);
+    prepareLiveDomPostProcessSource(this.pendingCaptureEl, this.canvas);
     this.context.requestRender();
   }
 
-  private drawPendingCapture(): boolean {
-    if (!this.pendingCaptureEl) return true;
-    const sharedCtx = this.context.sharedCapture
-      .context as DrawElementImageContext;
-    const drawElementImage = sharedCtx.drawElementImage;
-    if (typeof drawElementImage !== "function") return true;
-    const sharedCanvas = this.context.sharedCapture.canvas;
+  private drawPendingCapture(): CaptureDrawResult {
+    if (!this.pendingCaptureEl) return "drawn";
+    const captureCtx = this.ctx as DrawElementImageContext;
+    const drawElementImage = captureCtx.drawElementImage;
+    if (typeof drawElementImage !== "function") return "drawn";
     try {
-      sharedCtx.clearRect(0, 0, this.captureWidth, this.captureHeight);
+      prepareLiveDomPostProcessSource(this.pendingCaptureEl, this.canvas);
+      captureCtx.clearRect(0, 0, this.captureWidth, this.captureHeight);
       drawElementImage.call(
-        sharedCtx,
+        captureCtx,
         this.pendingCaptureEl,
         0,
         0,
         this.captureWidth,
         this.captureHeight,
       );
-      this.ctx.clearRect(0, 0, this.captureWidth, this.captureHeight);
-      this.ctx.drawImage(
-        sharedCanvas,
-        0,
-        0,
-        this.captureWidth,
-        this.captureHeight,
-        0,
-        0,
-        this.captureWidth,
-        this.captureHeight,
-      );
-      this.texture.needsUpdate = true;
+      this.flushCaptureTexture();
       this.material.userData.layerVideoFrameSignature =
         this.kind === "media" ? this.pendingCaptureKey : undefined;
       this.lastCaptureKey = this.pendingCaptureKey;
       this.clearPendingCapture();
-      return true;
+      return "drawn";
     } catch (error) {
-      if (isPaintRecordPending(error)) return false;
-      if (!this.warnedMissing) {
-        this.warnedMissing = true;
-        console.warn(
-          `PerElementCaptureNode(${this.id}): drawElementImage failed`,
-          error,
-        );
+      if (isPaintRecordPending(error)) {
+        if (this.kind === "code") {
+          this.startForeignObjectRasterFallback(this.pendingCaptureEl);
+          return "deferred";
+        }
+        return "retry";
       }
-      return false;
+      if (!this.warnedMissing) {
+        this.warnCaptureFailure(error);
+      }
+      return "retry";
     }
   }
 
@@ -366,10 +402,66 @@ class PerElementCaptureNode implements LayerNode {
     this.pendingCaptureEl?.remove();
     this.pendingCaptureEl = null;
     this.pendingCaptureKey = "";
+    this.rasterFallbackInFlight = false;
+  }
+
+  private startForeignObjectRasterFallback(source: HTMLElement): void {
+    if (this.rasterFallbackInFlight) return;
+    this.rasterFallbackInFlight = true;
+    const image = new Image();
+    image.onload = () => {
+      try {
+        this.ctx.clearRect(0, 0, this.captureWidth, this.captureHeight);
+        this.ctx.drawImage(image, 0, 0, this.captureWidth, this.captureHeight);
+        this.flushCaptureTexture();
+        this.lastCaptureKey = this.pendingCaptureKey;
+        this.clearPendingCapture();
+        this.context.requestRender();
+      } catch (error) {
+        this.rasterFallbackInFlight = false;
+        this.warnCaptureFailure(error);
+      }
+    };
+    image.onerror = () => {
+      this.rasterFallbackInFlight = false;
+      this.warnCaptureFailure(
+        new Error("PerElementCaptureNode: code SVG raster fallback failed"),
+      );
+    };
+    image.src = createForeignObjectDataUrl(
+      source,
+      this.width,
+      this.height,
+      this.capturePadding,
+      this.captureWidth,
+      this.captureHeight,
+    );
+  }
+
+  private warnCaptureFailure(error: unknown): void {
+    if (this.warnedMissing) return;
+    this.warnedMissing = true;
+    console.warn(
+      `PerElementCaptureNode(${this.id}): drawElementImage failed`,
+      error,
+    );
+  }
+
+  private flushCaptureTexture(): void {
+    if (this.context.materialBackend !== "webgpu-node") {
+      this.texture.needsUpdate = true;
+      return;
+    }
+    const previousTexture = this.texture;
+    this.texture = new THREE.CanvasTexture(this.canvas);
+    configureCaptureTexture(this.texture);
+    this.setCurrentMaterialTexture(this.texture);
+    previousTexture.dispose();
   }
 
   dispose(): void {
     this.clearPendingCapture();
+    this.canvas.remove();
     this.mesh.geometry.dispose();
     this.material.dispose();
     this.texture.dispose();
@@ -406,6 +498,14 @@ function cssEscape(value: string): string {
   return value.replace(/["\\]/g, "\\$&");
 }
 
+function getCodeLayerDomSignature(layerEl: Element): string {
+  const text = layerEl.textContent ?? "";
+  return JSON.stringify({
+    childCount: layerEl.childElementCount,
+    text,
+  });
+}
+
 function createCaptureClone(
   source: Element,
   width: number,
@@ -418,6 +518,8 @@ function createCaptureClone(
   const clone = source.cloneNode(true) as HTMLElement;
   if (!clone.style)
     throw new Error("PerElementCaptureNode: capture source is not HTMLElement");
+  copyImagePixelsIntoClone(source, clone);
+  copyCanvasPixelsIntoClone(source, clone);
   copyVideoFramesIntoClone(source, clone, videoFrameCache);
   Object.assign(clone.style, {
     position: "absolute",
@@ -446,6 +548,56 @@ function createCaptureClone(
   } as Partial<CSSStyleDeclaration>);
   wrapper.appendChild(clone);
   return wrapper;
+}
+
+function copyImagePixelsIntoClone(source: Element, clone: HTMLElement): void {
+  if (typeof source.querySelectorAll !== "function") return;
+  const sourceImages = Array.from(source.querySelectorAll("img"));
+  if (!sourceImages.length) return;
+  const cloneImages = Array.from(clone.querySelectorAll("img"));
+  for (let index = 0; index < sourceImages.length; index += 1) {
+    const sourceImage = sourceImages[index];
+    const cloneImage = cloneImages[index];
+    if (!cloneImage) continue;
+    if (!sourceImage.complete) continue;
+    if (sourceImage.naturalWidth <= 0 || sourceImage.naturalHeight <= 0)
+      continue;
+    const replacement = document.createElement("canvas");
+    replacement.width = sourceImage.naturalWidth;
+    replacement.height = sourceImage.naturalHeight;
+    replacement.style.cssText = cloneImage.style.cssText;
+    replacement.className = cloneImage.className;
+    const context = replacement.getContext("2d");
+    if (!context) continue;
+    try {
+      context.drawImage(sourceImage, 0, 0);
+      cloneImage.replaceWith(replacement);
+    } catch {
+      // Cross-origin images cannot be copied; keep the cloned image element.
+    }
+  }
+}
+
+function copyCanvasPixelsIntoClone(source: Element, clone: HTMLElement): void {
+  if (typeof source.querySelectorAll !== "function") return;
+  const sourceCanvases = Array.from(source.querySelectorAll("canvas"));
+  if (!sourceCanvases.length) return;
+  const cloneCanvases = Array.from(clone.querySelectorAll("canvas"));
+  for (let index = 0; index < sourceCanvases.length; index += 1) {
+    const sourceCanvas = sourceCanvases[index];
+    const cloneCanvas = cloneCanvases[index];
+    if (!cloneCanvas) continue;
+    if (sourceCanvas.width <= 0 || sourceCanvas.height <= 0) continue;
+    cloneCanvas.width = sourceCanvas.width;
+    cloneCanvas.height = sourceCanvas.height;
+    const context = cloneCanvas.getContext("2d");
+    if (!context) continue;
+    try {
+      context.drawImage(sourceCanvas, 0, 0);
+    } catch {
+      // Tainted canvases cannot be copied; capture the rest of the subtree.
+    }
+  }
 }
 
 function copyVideoFramesIntoClone(
@@ -504,6 +656,33 @@ function readVideoFrameCanvas(
   }
 }
 
+function createForeignObjectDataUrl(
+  source: HTMLElement,
+  width: number,
+  height: number,
+  padding: number,
+  captureWidth: number,
+  captureHeight: number,
+): string {
+  const clone = source.cloneNode(true) as HTMLElement;
+  if (!clone.style)
+    throw new Error("PerElementCaptureNode: capture source is not HTMLElement");
+  clone.setAttribute("xmlns", "http://www.w3.org/1999/xhtml");
+  Object.assign(clone.style, {
+    position: "relative",
+    left: `${padding}px`,
+    top: `${padding}px`,
+    width: `${width}px`,
+    height: `${height}px`,
+    transform: "none",
+    transformOrigin: "top left",
+    margin: "0",
+  } as Partial<CSSStyleDeclaration>);
+  const markup = new XMLSerializer().serializeToString(clone);
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${captureWidth}" height="${captureHeight}"><foreignObject x="0" y="0" width="${captureWidth}" height="${captureHeight}">${markup}</foreignObject></svg>`;
+  return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
+}
+
 function estimateCapturePadding(
   kind: FrameObjectType | "default",
   state: EvaluatedObjectState,
@@ -518,12 +697,20 @@ function createCaptureKey(
   kind: FrameObjectType | "default",
   state: EvaluatedObjectState,
 ): string {
-  if (kind !== "text") return `${Date.now()}:${Math.random()}`;
+  if (kind === "media") {
+    return `${Date.now()}:${Math.random()}`;
+  }
   return JSON.stringify({
+    kind,
     width: state.bounds?.width,
     height: state.bounds?.height,
     content: state.content,
+    props: state.props,
     style: {
+      background: state.style?.background,
+      backgroundColor: state.style?.backgroundColor,
+      border: state.style?.border,
+      borderRadius: state.style?.borderRadius,
       color: state.style?.color,
       fontFamily: state.style?.fontFamily,
       fontSize: state.style?.fontSize,

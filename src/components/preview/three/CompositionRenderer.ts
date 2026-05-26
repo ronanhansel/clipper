@@ -1,26 +1,21 @@
 import * as THREE from "three";
 import { RenderPipeline, WebGPURenderer } from "three/webgpu";
-import { EffectComposer } from "three/examples/jsm/postprocessing/EffectComposer.js";
-import { OutputPass } from "three/examples/jsm/postprocessing/OutputPass.js";
 import { pass } from "three/tsl";
 import { getCameraLensPostProcessPass } from "../../../core/cameraEffectsPasses";
 import { createCameraDofPass } from "../../../core/effects/postprocess/cameraDof";
 import {
-  DEFAULT_CAMERA_OBJECT_PROPS,
   FRAME_HEIGHT,
   FRAME_WIDTH,
   type CameraObjectProps,
   type CompositionClip,
+  type TransitionLayer,
 } from "../../../core/types";
-import { applyCompositionCameraToThree } from "./compositionCameraThree";
-import { LayerNodeSync } from "./layers/LayerNodeSync";
 import {
-  LayerShadowSync,
   type LayerShadowDebugImage,
   type LayerShadowDiagnostics,
   type LayerShadowObjectDiagnostics,
 } from "./layers/LayerShadowSync";
-import { SharedCaptureCanvas } from "./SharedCaptureCanvas";
+import { CompositionSceneInput } from "./CompositionSceneInput";
 import {
   createCameraDofModeNode,
   createCameraLensNode,
@@ -30,7 +25,11 @@ import {
   createGpuPostProcessNode,
   getGpuPostProcessPassSignature,
 } from "./gpuPostProcessNodes";
-import { ThinLensRenderPass } from "./ThinLensRenderPass";
+import {
+  applyGpuTransitionCompositeUniforms,
+  createGpuTransitionCompositeNode,
+  getGpuTransitionCompositeSignature,
+} from "./gpuTransitionCompositeNodes";
 import type { CompositionRendererBackendSelection } from "./compositionRendererBackend";
 import type { PostProcessPass } from "../../../core/effects/types";
 
@@ -53,11 +52,9 @@ export interface CompositionRendererOptions {
  * canvas + texture (no shared composite, no UV crop). Phase B replaces
  * image/text/svg with native primitives.
  *
- * Post-processing runs through Three's `EffectComposer` chain. The
- * composer's read RT carries a `DepthTexture` so the camera DoF pass
- * can sample scene depth without re-rendering the scene as
- * MeshDepthMaterial. Phases beyond DoF (lens distortion, CA) chain on
- * after as additional `Pass`es.
+ * Post-processing runs through Three WebGPU nodes appended to the output
+ * pipeline. There is no Direct WebGL fallback; if WebGPU is unavailable the
+ * host disables this renderer instead of maintaining a second renderer path.
  */
 export class CompositionRenderer {
   readonly hostRoot: HTMLDivElement;
@@ -65,54 +62,39 @@ export class CompositionRenderer {
   readonly backendSelection: CompositionRendererBackendSelection;
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  readonly scene: any;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  readonly camera: any;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   readonly renderer: any;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  private composer: any;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  private renderPass: any;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  private outputPass: any;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  private extraPasses: any[] = [];
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   private webGpuPipeline: any = null;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   private webGpuDofNode: any = null;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   private webGpuScenePass: any = null;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  private webGpuTransitionScenePass: any = null;
   private webGpuOutputSignature = "";
   private webGpuPostProcessSignature = "";
   private webGpuPostProcessPasses: PostProcessPass[] = [];
   private webGpuInitPromise: Promise<unknown> | null = null;
   private webGpuInitFailed = false;
   private pendingRenderFrame = 0;
-  private sharedCapture: SharedCaptureCanvas;
-  private layerSync: LayerNodeSync;
-  private shadowSync: LayerShadowSync;
+  private readonly sceneInput: CompositionSceneInput;
+  private readonly transitionSceneInput: CompositionSceneInput;
+  private webGpuTransitionComposite: {
+    layer: TransitionLayer;
+    progress: number;
+    fromCamera: CameraObjectProps | null;
+    toCamera: CameraObjectProps | null;
+  } | null = null;
   private readonly shadowDebugPane: HTMLDivElement;
   private readonly shadowDebugCanvas: HTMLCanvasElement;
   private readonly shadowDebugText: HTMLPreElement;
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  private backgroundMesh: any;
-
   private width: number;
   private height: number;
   private compositionCamera: CameraObjectProps | null = null;
-  private sourceElement: Element | null = null;
-  private lastComposition: {
-    part: CompositionClip | null;
-    localTime: number;
-    sourceElement: Element | null;
-    options: { syncShadows?: boolean; isPlaying?: boolean };
-  } | null = null;
 
   constructor(opts: CompositionRendererOptions) {
-    // Internal scene/RT/composer always run at the canonical frame
+    // Internal scene/RT output always runs at the canonical frame
     // resolution so Direct and the camera PIP produce identical pixels
     // regardless of host container size. The canvas's backing store is
     // FRAME_WIDTH × FRAME_HEIGHT; CSS scales the canvas to fit each host.
@@ -129,33 +111,12 @@ export class CompositionRenderer {
       throw new Error("CompositionRenderer requires WebGPU.");
     }
 
-    this.scene = new THREE.Scene();
-    this.camera = new THREE.PerspectiveCamera(
-      DEFAULT_CAMERA_OBJECT_PROPS.fov,
-      this.width / this.height,
-      DEFAULT_CAMERA_OBJECT_PROPS.near,
-      DEFAULT_CAMERA_OBJECT_PROPS.far,
-    );
-    applyCompositionCameraToThree(
-      this.camera,
-      DEFAULT_CAMERA_OBJECT_PROPS,
-      this.width / this.height,
-    );
-
-    const isWebGpu = this.backendSelection.kind === "webgpu";
-    this.renderer = isWebGpu
-      ? new WebGPURenderer({
-          alpha: true,
-          antialias: true,
-          premultipliedAlpha: true,
-        })
-      : new THREE.WebGLRenderer({
-          alpha: true,
-          antialias: true,
-          premultipliedAlpha: true,
-          preserveDrawingBuffer: false,
-        });
-    // Linear-light pipeline: scene + composer RTs are RGBA16F linear;
+    this.renderer = new WebGPURenderer({
+      alpha: true,
+      antialias: true,
+      premultipliedAlpha: true,
+    });
+    // Linear-light pipeline: scene + post-process nodes are RGBA16F linear;
     // Three encodes to sRGB on the final write to the default
     // framebuffer (the on-screen canvas). Matches AW/Frostbite/UE5 DoF
     // — bokeh maths must happen in linear space or highlights look
@@ -182,96 +143,44 @@ export class CompositionRenderer {
     this.canvas.style.height = "100%";
     this.canvas.style.pointerEvents = "none";
 
-    if (isWebGpu) {
-      const scenePass = pass(this.scene, this.camera, {
-        type: THREE.HalfFloatType,
-        format: THREE.RGBAFormat,
-      });
-      this.webGpuScenePass = scenePass;
-      this.webGpuDofNode = scenePass;
-      this.webGpuPipeline = new RenderPipeline(this.renderer, scenePass);
-      this.webGpuOutputSignature = "scene";
-      this.webGpuInitPromise = this.renderer
-        .init()
-        .then(() => {
-          if (this.lastComposition) {
-            this.setComposition(
-              this.lastComposition.part,
-              this.lastComposition.localTime,
-              this.lastComposition.sourceElement,
-              this.lastComposition.options,
-            );
-          }
-          this.render();
-        })
-        .catch((error: unknown) => {
-          this.webGpuInitFailed = true;
-          console.error("CompositionRenderer WebGPU init failed", error);
-        });
-    } else {
-      // Build EffectComposer with a custom read RT that carries a
-      // DepthTexture. RenderPass writes the beauty into this RT (and its
-      // depth attachment); the camera DoF pass reads `readBuffer.depthTexture`
-      // to compute its CoC. The clone for ping-pong gets a depth attachment
-      // too so the depth survives a swap (EffectComposer.clone() preserves
-      // the `depthBuffer` flag and the `DepthTexture`).
-      const depthTexture = new THREE.DepthTexture(
-        this.width,
-        this.height,
-        THREE.UnsignedShortType,
-      );
-      const composerRT = new THREE.WebGLRenderTarget(this.width, this.height, {
-        depthBuffer: true,
-        depthTexture,
-        type: THREE.HalfFloatType,
-        format: THREE.RGBAFormat,
-        colorSpace: THREE.LinearSRGBColorSpace,
-        // Mipmap chain on the colour attachment so the DoF pass can
-        // sample area-averaged colour at LOD = log2(σ_tap) per tap. This
-        // is what lets a 60-tap Vogel gather look like a high-quality
-        // bokeh: each tap's read is an integral over an area matched to
-        // its CoC, instead of one random texel that produces ghost-letter
-        // and grain artefacts on text content (Pixelmischief, "Bokeh
-        // Depth-of-Field"). Three's WebGLRenderer regenerates these
-        // mipmaps automatically on `setRenderTarget` transitions.
-        generateMipmaps: true,
-        minFilter: THREE.LinearMipmapLinearFilter,
-        magFilter: THREE.LinearFilter,
-      });
-      this.composer = new EffectComposer(this.renderer, composerRT);
-      this.renderPass = new ThinLensRenderPass(this.scene, this.camera, {
-        width: this.width,
-        height: this.height,
-        getCamera: () => this.compositionCamera,
-      });
-      this.outputPass = new OutputPass();
-      this.composer.addPass(this.renderPass);
-      this.composer.addPass(this.outputPass);
-    }
-
-    // The shared capture canvas is the DOM mount the host portals the
-    // source subtree into. Per-element capture nodes call
-    // `drawElementImage` on its 2D context (browsers require the
-    // captured element to be a descendant of THIS canvas), then blit
-    // pixels into their own private canvases. Native rect/null nodes
-    // ignore it.
-    this.sharedCapture = new SharedCaptureCanvas(FRAME_WIDTH, FRAME_HEIGHT);
-    this.layerSync = new LayerNodeSync({
-      materialBackend:
-        this.backendSelection.kind === "webgpu"
-          ? "webgpu-node"
-          : "webgl-shader",
-      sharedCapture: this.sharedCapture,
-      sourceRoot: () => this.sourceElement,
+    this.sceneInput = new CompositionSceneInput({
+      width: this.width,
+      height: this.height,
       requestRender: () => this.requestCompositionRender(),
     });
-    this.scene.add(this.layerSync.group);
-    this.shadowSync = new LayerShadowSync({
-      backend:
-        this.backendSelection.kind === "webgpu"
-          ? "webgpu-node"
-          : "webgl-shader",
+    this.transitionSceneInput = new CompositionSceneInput({
+      width: this.width,
+      height: this.height,
+      requestRender: () => this.requestCompositionRender(),
     });
+    const scenePass = pass(this.sceneInput.scene, this.sceneInput.camera, {
+      type: THREE.HalfFloatType,
+      format: THREE.RGBAFormat,
+    });
+    this.webGpuTransitionScenePass = pass(
+      this.transitionSceneInput.scene,
+      this.transitionSceneInput.camera,
+      {
+        type: THREE.HalfFloatType,
+        format: THREE.RGBAFormat,
+      },
+    );
+    this.webGpuScenePass = scenePass;
+    this.webGpuDofNode = scenePass;
+    this.webGpuPipeline = new RenderPipeline(this.renderer, scenePass);
+    this.webGpuOutputSignature = "scene";
+    this.webGpuInitPromise = this.renderer
+      .init()
+      .then(() => {
+        this.sceneInput.renderSnapshot(this.renderer, true);
+        this.transitionSceneInput.renderSnapshot(this.renderer, true);
+        this.render();
+      })
+      .catch((error: unknown) => {
+        this.webGpuInitFailed = true;
+        console.error("CompositionRenderer WebGPU init failed", error);
+      });
+
     this.shadowDebugPane = document.createElement("div");
     this.shadowDebugPane.style.position = "fixed";
     this.shadowDebugPane.style.left = "12px";
@@ -309,36 +218,6 @@ export class CompositionRenderer {
     this.shadowDebugText.style.minWidth = "0";
     this.shadowDebugPane.append(this.shadowDebugCanvas, this.shadowDebugText);
 
-    // Far-plane background. Without a real surface in the back of the
-    // frame the depth attachment reads `1.0` (cleared) on void pixels,
-    // which the DoF CoC math turns into a large blur with no colour to
-    // integrate against — a soft halo bleeds out of every layer
-    // silhouette. A single fullscreen mesh at world `z = -far + ε`
-    // gives every pixel real geometry, real depth, and a defined
-    // colour. Larger than the scene's far clip would clip; we sit just
-    // inside it. Geometry is enormous so any plausible camera FOV /
-    // composition framing keeps the plane fully covering the frustum.
-    const backgroundDistance =
-      DEFAULT_CAMERA_OBJECT_PROPS.far - DEFAULT_CAMERA_OBJECT_PROPS.near;
-    this.backgroundMesh = new THREE.Mesh(
-      new THREE.PlaneGeometry(backgroundDistance * 4, backgroundDistance * 4),
-      new THREE.MeshBasicMaterial({
-        color: 0x000000,
-        depthWrite: true,
-        depthTest: true,
-        side: THREE.DoubleSide,
-        transparent: false,
-      }),
-    );
-    this.backgroundMesh.name = "CompositionFarPlane";
-    this.backgroundMesh.position.set(
-      0,
-      0,
-      -(DEFAULT_CAMERA_OBJECT_PROPS.far - 1),
-    );
-    this.backgroundMesh.renderOrder = -1000;
-    this.scene.add(this.backgroundMesh);
-
     this.hostRoot = document.createElement("div");
     this.hostRoot.dataset.clipperCompositionRendererBackend =
       this.backendSelection.kind;
@@ -354,6 +233,8 @@ export class CompositionRenderer {
 
   setCamera(camera: CameraObjectProps | null) {
     this.compositionCamera = camera;
+    this.sceneInput.applyCamera(camera);
+    this.webGpuTransitionComposite = null;
     this.syncWebGpuOutputNode(camera);
   }
 
@@ -365,7 +246,11 @@ export class CompositionRenderer {
    * source subtree inside it.
    */
   get captureCanvas(): HTMLCanvasElement {
-    return this.sharedCapture.canvas;
+    return this.sceneInput.captureCanvas;
+  }
+
+  get transitionCaptureCanvas(): HTMLCanvasElement {
+    return this.transitionSceneInput.captureCanvas;
   }
 
   setViewport(_width: number, _height: number) {
@@ -390,58 +275,68 @@ export class CompositionRenderer {
     sourceElement: Element | null,
     options: { syncShadows?: boolean; isPlaying?: boolean } = {},
   ) {
-    this.lastComposition = { part, localTime, sourceElement, options };
-    if (sourceElement !== this.sourceElement) {
-      this.sourceElement = sourceElement;
-      this.sharedCapture.prepare(sourceElement);
-    }
-    this.layerSync.sync(part, localTime, { isPlaying: options.isPlaying });
-    if (
-      this.backendSelection.kind === "webgpu" &&
-      this.renderer.initialized !== true
-    ) {
-      this.layerSync.applyShadow(this.shadowSync.getState());
-      this.updateShadowDebugPane();
-      return;
-    }
-    if (options.syncShadows === false) {
-      this.layerSync.applyShadow(this.shadowSync.getState());
-    } else {
-      const shadow = this.shadowSync.sync(
-        part,
-        localTime,
-        this.renderer,
-        this.layerSync.group,
-      );
-      this.layerSync.applyShadow(shadow);
-    }
+    this.webGpuTransitionComposite = null;
+    this.sceneInput.syncComposition(
+      part,
+      localTime,
+      sourceElement,
+      this.renderer,
+      this.renderer.initialized === true,
+      options,
+    );
     this.updateShadowDebugPane();
   }
 
-  /**
-   * Replace the composer pass list (DoF, lens, etc). Pass instances are
-   * Three.js `Pass` subclasses. Always preserves the leading
-   * `RenderPass` and rebuilds the chain after it. Phase 2 uses this to
-   * feed the camera DoF + lens chain.
-   */
+  setTransitionComposition(input: {
+    from: {
+      part: CompositionClip;
+      localTime: number;
+      sourceElement: Element | null;
+      camera: CameraObjectProps | null;
+    };
+    to: {
+      part: CompositionClip;
+      localTime: number;
+      sourceElement: Element | null;
+      camera: CameraObjectProps | null;
+    };
+    layer: TransitionLayer;
+    progress: number;
+    options?: { syncShadows?: boolean; isPlaying?: boolean };
+  }) {
+    const options = input.options ?? {};
+    this.compositionCamera = input.from.camera;
+    this.sceneInput.applyCamera(input.from.camera);
+    this.transitionSceneInput.applyCamera(input.to.camera);
+    this.sceneInput.syncComposition(
+      input.from.part,
+      input.from.localTime,
+      input.from.sourceElement,
+      this.renderer,
+      this.renderer.initialized === true,
+      options,
+    );
+    this.transitionSceneInput.syncComposition(
+      input.to.part,
+      input.to.localTime,
+      input.to.sourceElement,
+      this.renderer,
+      this.renderer.initialized === true,
+      options,
+    );
+    this.webGpuTransitionComposite = {
+      layer: input.layer,
+      progress: input.progress,
+      fromCamera: input.from.camera,
+      toCamera: input.to.camera,
+    };
+    this.syncWebGpuOutputNode(input.from.camera);
+    this.updateShadowDebugPane();
+  }
+
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   setComposerPasses(passes: any[]) {
-    if (this.backendSelection.kind === "webgpu") {
-      disposeComposerPasses(passes);
-      return;
-    }
-    // Remove previously appended passes (Three's EffectComposer doesn't
-    // expose a clear-from-index, so do it explicitly).
-    for (const p of this.extraPasses) {
-      this.composer.removePass(p);
-      if (typeof p.dispose === "function") p.dispose();
-    }
-    this.composer.removePass(this.outputPass);
-    this.extraPasses = passes.slice();
-    for (const p of this.extraPasses) {
-      this.composer.addPass(p);
-    }
-    this.composer.addPass(this.outputPass);
+    disposeComposerPasses(passes);
   }
 
   setGpuPostProcessPasses(passes: readonly PostProcessPass[]) {
@@ -456,17 +351,9 @@ export class CompositionRenderer {
   }
 
   render() {
-    applyCompositionCameraToThree(
-      this.camera,
-      this.compositionCamera,
-      this.width / this.height,
-    );
-    if (this.backendSelection.kind === "webgpu") {
-      if (this.webGpuInitFailed || this.renderer.initialized !== true) return;
-      this.webGpuPipeline.render();
-      return;
-    }
-    this.composer.render();
+    this.sceneInput.applyCamera(this.compositionCamera);
+    if (this.webGpuInitFailed || this.renderer.initialized !== true) return;
+    this.webGpuPipeline.render();
   }
 
   private requestCompositionRender() {
@@ -478,21 +365,19 @@ export class CompositionRenderer {
   }
 
   private renderCompositionSnapshot() {
-    if (!this.lastComposition) {
-      this.render();
-      return;
-    }
-    this.setComposition(
-      this.lastComposition.part,
-      this.lastComposition.localTime,
-      this.lastComposition.sourceElement,
-      this.lastComposition.options,
+    this.sceneInput.renderSnapshot(
+      this.renderer,
+      this.renderer.initialized === true,
+    );
+    this.transitionSceneInput.renderSnapshot(
+      this.renderer,
+      this.renderer.initialized === true,
     );
     this.render();
   }
 
   private updateShadowDebugPane() {
-    const diagnostics = this.shadowSync.getDiagnostics();
+    const diagnostics = this.sceneInput.getShadowDiagnostics();
     if (diagnostics.light?.debug !== true) {
       this.shadowDebugPane.style.display = "none";
       return;
@@ -501,8 +386,8 @@ export class CompositionRenderer {
       document.body.appendChild(this.shadowDebugPane);
     }
     const debug =
-      this.shadowSync.readDebugImageData(this.renderer, 64) ??
-      this.shadowSync.getCachedDebugImage();
+      this.sceneInput.readShadowDebugImageData(this.renderer, 64) ??
+      this.sceneInput.getCachedShadowDebugImage();
     if (debug) {
       this.shadowDebugCanvas.getContext("2d")?.putImageData(debug.image, 0, 0);
       drawObjectOverlays(this.shadowDebugCanvas, debug.objects);
@@ -521,28 +406,19 @@ export class CompositionRenderer {
       cancelAnimationFrame(this.pendingRenderFrame);
       this.pendingRenderFrame = 0;
     }
-    this.scene.remove(this.layerSync.group);
-    this.layerSync.dispose();
-    this.shadowSync.dispose();
-    this.scene.remove(this.backgroundMesh);
-    this.backgroundMesh.geometry.dispose();
-    this.backgroundMesh.material.dispose();
-    this.sharedCapture.dispose();
-    for (const p of this.extraPasses) {
-      if (typeof p.dispose === "function") p.dispose();
-    }
-    this.extraPasses.length = 0;
+    this.sceneInput.dispose();
+    this.transitionSceneInput.dispose();
     this.webGpuDofNode?.dispose?.();
     this.webGpuPipeline?.dispose?.();
-    this.composer?.dispose?.();
-    this.renderPass?.dispose?.();
-    this.outputPass?.dispose?.();
     this.renderer.dispose();
     this.shadowDebugPane.remove();
   }
 
   private syncWebGpuOutputNode(camera: CameraObjectProps | null): void {
-    if (this.backendSelection.kind !== "webgpu" || !this.webGpuPipeline) return;
+    if (!this.webGpuPipeline) return;
+    const transitionSignature = this.webGpuTransitionComposite
+      ? getGpuTransitionCompositeSignature(this.webGpuTransitionComposite.layer)
+      : null;
     const lensPass = camera
       ? getCameraLensPostProcessPass(camera, {
           idScope: "camera",
@@ -557,26 +433,53 @@ export class CompositionRenderer {
     const outputSignature = JSON.stringify({
       camera: signature,
       postProcess: this.webGpuPostProcessSignature,
+      transition: transitionSignature,
     });
-    if (outputSignature === this.webGpuOutputSignature) return;
+    if (outputSignature === this.webGpuOutputSignature) {
+      applyGpuTransitionCompositeUniforms(
+        this.webGpuTransitionComposite?.layer ?? null,
+        { progress: this.webGpuTransitionComposite?.progress ?? 0 },
+      );
+      return;
+    }
     this.webGpuOutputSignature = outputSignature;
-    let outputNode = dofPass
-      ? createCameraDofModeNode(
-          this.webGpuScenePass,
-          this.webGpuScenePass.getViewZNode(),
-          dofPass,
-          {
-            width: this.width,
-            height: this.height,
-          },
-        )
-      : this.webGpuDofNode;
-    outputNode = lensPass
-      ? createCameraLensNode(outputNode, lensPass, {
-          width: this.width,
-          height: this.height,
-        })
-      : outputNode;
+    let outputNode = this.createCameraOutputNode(
+      this.webGpuScenePass,
+      camera,
+      dofPass,
+      lensPass,
+    );
+    if (this.webGpuTransitionComposite) {
+      const toLensPass = this.webGpuTransitionComposite.toCamera
+        ? getCameraLensPostProcessPass(
+            this.webGpuTransitionComposite.toCamera,
+            {
+              idScope: "transition-to-camera",
+              frameSize: { width: this.width, height: this.height },
+            },
+          )
+        : null;
+      const toDofPass =
+        this.webGpuTransitionComposite.toCamera &&
+        hasWebGpuDof(this.webGpuTransitionComposite.toCamera)
+          ? createCameraDofPass(
+              this.webGpuTransitionComposite.toCamera,
+              "transition-to-camera",
+            )
+          : null;
+      const toNode = this.createCameraOutputNode(
+        this.webGpuTransitionScenePass,
+        this.webGpuTransitionComposite.toCamera,
+        toDofPass,
+        toLensPass,
+      );
+      outputNode = createGpuTransitionCompositeNode({
+        fromNode: outputNode,
+        toNode,
+        layer: this.webGpuTransitionComposite.layer,
+        progress: this.webGpuTransitionComposite.progress,
+      });
+    }
     for (const postProcessPass of this.webGpuPostProcessPasses) {
       outputNode = createGpuPostProcessNode(outputNode, postProcessPass, {
         width: this.width,
@@ -585,6 +488,33 @@ export class CompositionRenderer {
     }
     this.webGpuPipeline.outputNode = outputNode;
     this.webGpuPipeline.needsUpdate = true;
+  }
+
+  private createCameraOutputNode(
+    scenePass: any,
+    camera: CameraObjectProps | null,
+    dofPass: ReturnType<typeof createCameraDofPass>,
+    lensPass: ReturnType<typeof getCameraLensPostProcessPass>,
+  ) {
+    let outputNode =
+      camera && dofPass
+        ? createCameraDofModeNode(
+            scenePass,
+            scenePass.getViewZNode(),
+            dofPass,
+            {
+              width: this.width,
+              height: this.height,
+            },
+          )
+        : scenePass;
+    outputNode = lensPass
+      ? createCameraLensNode(outputNode, lensPass, {
+          width: this.width,
+          height: this.height,
+        })
+      : outputNode;
+    return outputNode;
   }
 }
 

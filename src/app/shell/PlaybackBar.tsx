@@ -72,7 +72,7 @@ export function PlaybackBar({
   togglePlayback,
   updateFramePreviewScale,
 }: PlaybackBarProps) {
-  const sceneTime = usePlayheadSceneTime();
+  const sceneTime = usePlayheadSceneTime(!isPlaying);
   const playbackDisplayTime = clamp(
     toPlaybackDisplayTime(sceneTime),
     0,

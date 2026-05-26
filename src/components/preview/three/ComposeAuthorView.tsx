@@ -11,7 +11,7 @@ import {
   type ThreeAuthorObjectTransformUpdate,
   type ThreeOrbitState,
 } from "./ThreeAuthorScene";
-import { CompositionWebGLHost } from "./CompositionWebGLHost";
+import { DirectCompositionGpuHost } from "./DirectCompositionGpuHost";
 import {
   applyCameraTargetAutomation,
   evaluateCameraObjectPropsAt,
@@ -247,7 +247,7 @@ function FitCameraPreview({
           height: FRAME_HEIGHT,
         }}
       >
-        <CompositionWebGLHost
+        <DirectCompositionGpuHost
           part={part}
           localTime={localTime}
           hostClassName="h-full w-full"
@@ -275,7 +275,7 @@ export interface ComposeAuthorViewProps {
    */
   renderComposition: () => React.ReactNode;
   /**
-   * Backend props used by the camera PIP's internal `CompositionWebGLHost`.
+   * Backend props used by the camera PIP's internal `DirectCompositionGpuHost`.
    * The host owns its own sealed source tree internally; we just
    * forward the per-frame state.
    */
@@ -329,7 +329,7 @@ export interface ComposeAuthorViewProps {
  * agnostic about how the composition is drawn while letting it own the
  * 3D camera + gizmo lifecycle.
  *
- * The camera PIP renders through `CompositionWebGLHost`. Phase 1b ships
+ * The camera PIP renders through `DirectCompositionGpuHost`. Phase 1b ships
  * the PIP without DoF — phase 2 routes DoF passes through the renderer's
  * composer so Direct + PIP share the same post-process path.
  */
@@ -1052,7 +1052,7 @@ export function ComposeAuthorView(props: ComposeAuthorViewProps) {
           data-clipper-camera-pip
           data-clipper-camera-pip-dof="deferred"
         >
-          <CompositionWebGLHost
+          <DirectCompositionGpuHost
             part={props.part}
             localTime={props.localTime}
             hostClassName="h-full w-full"
