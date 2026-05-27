@@ -112,6 +112,7 @@ import { CodeObjectRuntimeHostBridge } from "./render-engine/codeObjectRuntimeHo
 import { type PlaybackClock } from "./app/types";
 import { getTimeSensitiveDisplayDuration } from "./core/adjustments";
 import {
+  frameObjectFromBackgroundLayer,
   getBoundsUnion,
   selectionObjectFromBackgroundLayer,
   selectionObjectFromFrameObject,
@@ -1160,6 +1161,27 @@ function AppContent({
     clearStoredMarkerSelection,
   });
 
+  const handleSelectComposeObject = useCallback(
+    (objectId: string | null) => {
+      if (!objectId) {
+        setComposeSelectionObjects([]);
+        return;
+      }
+      const foundObject =
+        part.objects.find((o) => o.id === objectId) ??
+        part.background.elements.find((o) => o.id === objectId) ??
+        (objectId === part.background.id
+          ? frameObjectFromBackgroundLayer(part.background)
+          : undefined);
+      if (foundObject) {
+        setComposeSelectionObjects([foundObject]);
+      } else {
+        setSelectedObjectId(objectId);
+      }
+    },
+    [part, setComposeSelectionObjects, setSelectedObjectId],
+  );
+
   useComposeSelectionHydration({
     part,
     timelineMode,
@@ -2130,7 +2152,7 @@ function AppContent({
     selectedObjectId,
     onCameraPropsChange: handleCameraPropsChange,
     onCameraPathEaseChange: handleCameraPathEaseChange,
-    onSelectObject: setSelectedObjectId,
+    onSelectObject: handleSelectComposeObject,
     authorViewState: project.editorState?.threeAuthorView,
     onAuthorViewStateChange: handleAuthorViewStateChange,
     onObjectTransformChange: handleObjectTransformChange,

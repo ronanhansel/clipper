@@ -3,6 +3,7 @@
 Project-agnostic engineering rules. For domain specifics, see `docs/`.
 
 ## Workflow
+
 - You are working in development environment, if you need to browse saved projects, it's saved in clipper/ folder in this repo.
 - Run `npm run typecheck` before committing (also formats).
 - Don't run `git diff` unless asked.
