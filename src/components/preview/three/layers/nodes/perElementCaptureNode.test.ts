@@ -553,7 +553,7 @@ describe("perElementCaptureNode", () => {
     node.dispose();
   });
 
-  it("does not recapture unchanged text pixels every update", () => {
+  it("does not recapture unchanged text pixels every update after settling", () => {
     const sharedCapture = makeFakeSharedCapture();
     const root = new FakeElement();
     const layer = new FakeElement();
@@ -569,13 +569,14 @@ describe("perElementCaptureNode", () => {
     node.update(makeState());
     const drawElementImage = getNodeCaptureContext(sharedCapture)
       .drawElementImage as ReturnType<typeof vi.fn>;
-    node.update(makeState());
-    node.update(makeState());
-    expect(drawElementImage).toHaveBeenCalledTimes(1);
+    for (let i = 0; i < 10; i++) {
+      node.update(makeState());
+    }
+    expect(drawElementImage).toHaveBeenCalledTimes(5);
     node.dispose();
   });
 
-  it("does not recapture unchanged code pixels every update", () => {
+  it("does not recapture unchanged code pixels every update after settling", () => {
     const sharedCapture = makeFakeSharedCapture();
     const root = new FakeElement();
     const layer = new FakeElement();
@@ -596,19 +597,15 @@ describe("perElementCaptureNode", () => {
     );
     const drawElementImage = getNodeCaptureContext(sharedCapture)
       .drawElementImage as ReturnType<typeof vi.fn>;
-    node.update(
-      makeState({
-        bounds: { x: 0, y: 0, width: 50, height: 25 },
-        props: { source: "untitled.tsx", colour: "#5cff00" },
-      }),
-    );
-    node.update(
-      makeState({
-        bounds: { x: 0, y: 0, width: 50, height: 25 },
-        props: { source: "untitled.tsx", colour: "#5cff00" },
-      }),
-    );
-    expect(drawElementImage).toHaveBeenCalledTimes(1);
+    for (let i = 0; i < 10; i++) {
+      node.update(
+        makeState({
+          bounds: { x: 0, y: 0, width: 50, height: 25 },
+          props: { source: "untitled.tsx", colour: "#5cff00" },
+        }),
+      );
+    }
+    expect(drawElementImage).toHaveBeenCalledTimes(5);
     node.dispose();
   });
 
@@ -660,7 +657,7 @@ describe("perElementCaptureNode", () => {
       originalXMLSerializer;
   });
 
-  it("does not recapture text pixels for opacity-only changes", () => {
+  it("does not recapture text pixels for opacity-only changes after settling", () => {
     const sharedCapture = makeFakeSharedCapture();
     const root = new FakeElement();
     const layer = new FakeElement();
@@ -676,9 +673,15 @@ describe("perElementCaptureNode", () => {
     node.update(makeState({ style: { opacity: 1 } }));
     const drawElementImage = getNodeCaptureContext(sharedCapture)
       .drawElementImage as ReturnType<typeof vi.fn>;
+    // Allow settling (5 frames)
+    for (let i = 0; i < 4; i++) {
+      node.update(makeState({ style: { opacity: 1 } }));
+    }
+    // Now change opacity
     node.update(makeState({ style: { opacity: 0.4 } }));
     node.update(makeState({ style: { opacity: 0.4 } }));
-    expect(drawElementImage).toHaveBeenCalledTimes(1);
+    // 1 initial + 4 settling updates = 5 total draws. Change of opacity shouldn't trigger any extra draws.
+    expect(drawElementImage).toHaveBeenCalledTimes(5);
     expect(node.object3D.material.uniforms.u_opacity.value).toBeCloseTo(0.4);
     node.dispose();
   });

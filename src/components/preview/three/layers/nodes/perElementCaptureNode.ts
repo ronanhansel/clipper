@@ -2,6 +2,7 @@ import * as THREE from "three";
 import { MeshBasicNodeMaterial } from "three/webgpu";
 import { Fn, texture as textureNode, uniform, uv, vec4 } from "three/tsl";
 import { prepareLiveDomPostProcessSource } from "../../../../../core/effects/postprocess/liveDomCapability";
+import { hasVisibleShadow } from "../../../../../core/effects/shadowVisibility";
 import type { EvaluatedObjectState } from "../../../../../core/propertyRegistry";
 import {
   type FrameObject,
@@ -215,6 +216,8 @@ class PerElementCaptureNode implements LayerNode {
   private readonly context: LayerNodeContext;
   private width = 1;
   private height = 1;
+  private layoutWidth = 1;
+  private layoutHeight = 1;
   private capturePadding = 0;
   private captureWidth = 1;
   private captureHeight = 1;
@@ -224,6 +227,7 @@ class PerElementCaptureNode implements LayerNode {
   private rasterFallbackInFlight = false;
   private warnedMissing = false;
   private readonly videoFrameCache = new Map<number, HTMLCanvasElement>();
+  private captureCount = 0;
 
   constructor(
     id: string,
@@ -270,9 +274,44 @@ class PerElementCaptureNode implements LayerNode {
       this.width = t.width;
       this.height = t.height;
     }
+
+    let layoutWidth = t.width;
+    let layoutHeight = t.height;
+    const sourceRoot = this.context.sourceRoot();
+    const layerEl = sourceRoot?.querySelector(
+      `[data-clipper-render-object-id="${cssEscape(this.id)}"]`,
+    ) as HTMLElement | null;
+
+    if (layerEl) {
+      const textBoxLayout = String(state.style?.textBoxLayout ?? "fixed");
+      const hasActiveShadow = hasVisibleShadow(state.shadow);
+      const isClipped = textBoxLayout === "fixed" && !hasActiveShadow;
+
+      if (isClipped) {
+        layoutWidth = layerEl.offsetWidth || t.width;
+        layoutHeight = layerEl.offsetHeight || t.height;
+      } else {
+        layoutWidth =
+          Math.max(layerEl.offsetWidth || 0, layerEl.scrollWidth || 0) ||
+          t.width;
+        layoutHeight =
+          Math.max(layerEl.offsetHeight || 0, layerEl.scrollHeight || 0) ||
+          t.height;
+      }
+    }
+
+    this.layoutWidth = layoutWidth;
+    this.layoutHeight = layoutHeight;
+
     const capturePadding = estimateCapturePadding(this.kind, state, this.ctx);
-    const captureWidth = Math.max(1, Math.ceil(t.width + capturePadding * 2));
-    const captureHeight = Math.max(1, Math.ceil(t.height + capturePadding * 2));
+    const captureWidth = Math.max(
+      1,
+      Math.ceil(layoutWidth + capturePadding * 2),
+    );
+    const captureHeight = Math.max(
+      1,
+      Math.ceil(layoutHeight + capturePadding * 2),
+    );
     if (
       capturePadding !== this.capturePadding ||
       captureWidth !== this.captureWidth ||
@@ -293,6 +332,7 @@ class PerElementCaptureNode implements LayerNode {
       this.mesh.geometry.dispose();
       this.mesh.geometry = new THREE.PlaneGeometry(captureWidth, captureHeight);
       this.clearPendingCapture();
+      this.captureCount = 0;
     }
 
     this.mesh.position.set(t.positionX, t.positionY, t.positionZ);
@@ -345,18 +385,25 @@ class PerElementCaptureNode implements LayerNode {
         return;
       }
     }
-    if (this.kind !== "code" && captureKey === this.lastCaptureKey) return;
+
     const sourceRoot = this.context.sourceRoot();
     if (!sourceRoot) return;
     const layerEl = sourceRoot.querySelector(
       `[data-clipper-render-object-id="${cssEscape(this.id)}"]`,
     );
     if (!layerEl) return;
+
     const effectiveCaptureKey =
       this.kind === "code"
         ? `${captureKey}:${getCodeLayerDomSignature(layerEl)}`
         : captureKey;
-    if (effectiveCaptureKey === this.lastCaptureKey) return;
+
+    const isNewKey = effectiveCaptureKey !== this.lastCaptureKey;
+    if (!isNewKey && this.captureCount >= 5) return;
+
+    if (isNewKey) {
+      this.captureCount = 0;
+    }
 
     const captureCtx = this.ctx as DrawElementImageContext;
     const drawElementImage = captureCtx.drawElementImage;
@@ -367,14 +414,21 @@ class PerElementCaptureNode implements LayerNode {
     if (this.canvas.parentNode !== captureMount)
       captureMount.appendChild(this.canvas);
     this.clearPendingCapture();
+
+    const textBoxLayout = String(state.style?.textBoxLayout ?? "fixed");
+    const hasActiveShadow = hasVisibleShadow(state.shadow);
+    const overflow =
+      textBoxLayout === "fixed" && !hasActiveShadow ? "hidden" : "visible";
+
     this.pendingCaptureEl = createCaptureClone(
       layerEl,
-      this.width,
-      this.height,
+      this.layoutWidth,
+      this.layoutHeight,
       this.capturePadding,
       this.captureWidth,
       this.captureHeight,
       this.videoFrameCache,
+      overflow,
     );
     this.pendingCaptureKey = effectiveCaptureKey;
     this.canvas.appendChild(this.pendingCaptureEl);
@@ -401,6 +455,11 @@ class PerElementCaptureNode implements LayerNode {
       this.flushCaptureTexture();
       this.material.userData.layerVideoFrameSignature =
         this.kind === "media" ? this.pendingCaptureKey : undefined;
+      if (this.lastCaptureKey === this.pendingCaptureKey) {
+        this.captureCount++;
+      } else {
+        this.captureCount = 1;
+      }
       this.lastCaptureKey = this.pendingCaptureKey;
       this.clearPendingCapture();
       return "drawn";
@@ -435,6 +494,11 @@ class PerElementCaptureNode implements LayerNode {
         this.ctx.clearRect(0, 0, this.captureWidth, this.captureHeight);
         this.ctx.drawImage(image, 0, 0, this.captureWidth, this.captureHeight);
         this.flushCaptureTexture();
+        if (this.lastCaptureKey === this.pendingCaptureKey) {
+          this.captureCount++;
+        } else {
+          this.captureCount = 1;
+        }
         this.lastCaptureKey = this.pendingCaptureKey;
         this.clearPendingCapture();
         this.context.requestRender();
@@ -451,8 +515,8 @@ class PerElementCaptureNode implements LayerNode {
     };
     image.src = createForeignObjectDataUrl(
       source,
-      this.width,
-      this.height,
+      this.layoutWidth,
+      this.layoutHeight,
       this.capturePadding,
       this.captureWidth,
       this.captureHeight,
@@ -535,6 +599,7 @@ function createCaptureClone(
   captureWidth: number,
   captureHeight: number,
   videoFrameCache: Map<number, HTMLCanvasElement>,
+  overflow: "visible" | "hidden",
 ): HTMLElement {
   const clone = source.cloneNode(true) as HTMLElement;
   if (!clone.style)
@@ -552,7 +617,11 @@ function createCaptureClone(
     transformOrigin: "top left",
     pointerEvents: "none",
     margin: "0",
+    overflow,
   } as Partial<CSSStyleDeclaration>);
+  if (typeof clone.style.setProperty === "function") {
+    clone.style.setProperty("overflow", overflow, "important");
+  }
   clone.removeAttribute("data-object-id");
   if (padding <= 0) return clone;
 
@@ -792,6 +861,7 @@ function createCaptureKey(
       letterSpacing: state.style?.letterSpacing,
       lineHeight: state.style?.lineHeight,
       textAlign: state.style?.textAlign,
+      textBoxLayout: state.style?.textBoxLayout,
     },
   });
 }

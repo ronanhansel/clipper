@@ -1,6 +1,7 @@
 import {
   memo,
   useLayoutEffect,
+  useMemo,
   useRef,
   type CSSProperties,
   type MouseEvent as ReactMouseEvent,
@@ -59,6 +60,7 @@ type SceneCompositorProps = {
   transitionProgress: number | null;
   transitionSequenceStyle: TransitionSequenceStyle | undefined;
   stackPreviewParts: TimelinePreviewStackPart[];
+  prewarmParts?: TimelinePreviewStackPart[];
   activePartId: string;
   renderMode: "preview" | "export";
   isPlaying: boolean;
@@ -154,6 +156,7 @@ export const SceneCompositor = memo(function SceneCompositor({
   transitionProgress,
   transitionSequenceStyle,
   stackPreviewParts,
+  prewarmParts,
   activePartId,
   renderMode,
   isPlaying,
@@ -187,7 +190,10 @@ export const SceneCompositor = memo(function SceneCompositor({
   onAuthorPreviewContextMenu,
   isPostProcessSource,
 }: SceneCompositorProps) {
-  const lastDirectGpuHostInputRef = useRef<DirectGpuHostInput | null>(null);
+  const mountedSlotsRef = useRef<
+    Array<{ key: string; part: CompositionClip; start: number }>
+  >([]);
+
   useLayoutEffect(() => {
     const element = cameraRef.current;
     if (!element) return;
@@ -221,36 +227,105 @@ export const SceneCompositor = memo(function SceneCompositor({
     hasTransitionPreviewParts: Boolean(transitionPreviewParts),
     transitionProgress,
   });
-  const currentDirectGpuHostInput =
-    flattenComposition &&
-    !transitionPreviewParts &&
-    stackPreviewParts.length === 1
-      ? {
-          part: stackPreviewParts[0].part,
-          localTime: stackPreviewParts[0].previewTime,
-          sourceSlots: stackPreviewParts,
-          backendProps: {
-            animationsEnabled,
-            frameScale,
-            previewFps,
-            hideNullObjects,
-            isPlaying,
-            duration: stackPreviewParts[0].part.duration,
-            renderClockSceneTime: displaySceneTime,
-            renderMode,
-            exportTileFrameBounds,
-          },
-          transitionComposite: null,
-        }
-      : null;
-  if (currentDirectGpuHostInput) {
-    lastDirectGpuHostInputRef.current = currentDirectGpuHostInput;
-  }
-  const directGpuHostInput =
-    currentDirectGpuHostInput ??
-    (flattenComposition && !useDomTransitionComposite
-      ? lastDirectGpuHostInputRef.current
-      : null);
+
+  const frameStyle = transitionSequenceStyle?.frameStyle as
+    | CSSProperties
+    | undefined;
+  const aStyle = transitionSequenceStyle?.aStyle as CSSProperties | undefined;
+  const bStyle = transitionSequenceStyle?.bStyle as CSSProperties | undefined;
+
+  const visibleItems = useMemo(() => {
+    const items: Array<{
+      part: CompositionClip;
+      start: number;
+      previewTime: number;
+      role: "active" | "from" | "to";
+      sceneTime: number;
+    }> = [];
+    if (useDomTransitionComposite && transitionPreviewParts) {
+      if (transitionPreviewParts.from[0]) {
+        items.push({
+          part: transitionPreviewParts.from[0].part,
+          start: transitionPreviewParts.from[0].start,
+          previewTime: transitionPreviewParts.from[0].previewTime,
+          role: "from",
+          sceneTime: transitionPreviewParts.fromSceneTime,
+        });
+      }
+      if (transitionPreviewParts.to[0]) {
+        items.push({
+          part: transitionPreviewParts.to[0].part,
+          start: transitionPreviewParts.to[0].start,
+          previewTime: transitionPreviewParts.to[0].previewTime,
+          role: "to",
+          sceneTime: transitionPreviewParts.toSceneTime,
+        });
+      }
+    } else if (flattenComposition && stackPreviewParts.length === 1) {
+      items.push({
+        part: stackPreviewParts[0].part,
+        start: stackPreviewParts[0].start,
+        previewTime: stackPreviewParts[0].previewTime,
+        role: "active",
+        sceneTime: displaySceneTime,
+      });
+    }
+    return items;
+  }, [
+    useDomTransitionComposite,
+    transitionPreviewParts,
+    stackPreviewParts,
+    displaySceneTime,
+    flattenComposition,
+  ]);
+
+  const mountedSlots = useMemo(() => {
+    const previous = mountedSlotsRef.current;
+    const nextSlots: Array<{
+      key: string;
+      part: CompositionClip;
+      start: number;
+    }> = [];
+    const seenKeys = new Set<string>();
+
+    // 1. Keep visible items first
+    for (const item of visibleItems) {
+      const key = `${item.part.id}:${item.start}`;
+      if (seenKeys.has(key)) continue;
+      seenKeys.add(key);
+      nextSlots.push({
+        key,
+        part: item.part,
+        start: item.start,
+      });
+    }
+
+    // 2. Keep prewarm parts
+    if (prewarmParts) {
+      for (const item of prewarmParts) {
+        const key = `${item.part.id}:${item.start}`;
+        if (seenKeys.has(key)) continue;
+        seenKeys.add(key);
+        nextSlots.push({
+          key,
+          part: item.part,
+          start: item.start,
+        });
+      }
+    }
+
+    // 3. Keep recently visible items (cap at 4)
+    const maxSlots = 4;
+    for (const slot of previous) {
+      if (nextSlots.length >= maxSlots) break;
+      if (seenKeys.has(slot.key)) continue;
+      seenKeys.add(slot.key);
+      nextSlots.push(slot);
+    }
+
+    mountedSlotsRef.current = nextSlots;
+    return nextSlots;
+  }, [visibleItems, prewarmParts]);
 
   return (
     <div
@@ -271,26 +346,92 @@ export const SceneCompositor = memo(function SceneCompositor({
         }}
       >
         <FramePreviewRenderBoundary filePath={filePath} resetKey={resetKey}>
-          {directGpuHostInput ? (
+          {flattenComposition ? (
             <div
-              className="absolute inset-0"
-              style={
-                currentDirectGpuHostInput
-                  ? undefined
-                  : hiddenKeepMountedDirectHostStyle
-              }
-              aria-hidden={currentDirectGpuHostInput ? undefined : true}
+              className="absolute inset-0 overflow-hidden"
+              style={useDomTransitionComposite ? frameStyle : undefined}
             >
-              <DirectCompositionGpuHost
-                part={directGpuHostInput.part}
-                localTime={directGpuHostInput.localTime}
-                sourceSlots={directGpuHostInput.sourceSlots}
-                backendProps={directGpuHostInput.backendProps}
-                adjustmentLayers={adjustmentLayers}
-                transitionLayers={transitionLayers}
-                transitionComposite={directGpuHostInput.transitionComposite}
-                hostClassName="pointer-events-none absolute inset-0"
-              />
+              {mountedSlots.map((slot) => {
+                const visibleItem = visibleItems.find(
+                  (item) => `${item.part.id}:${item.start}` === slot.key,
+                );
+                const isVisible = Boolean(visibleItem);
+
+                let slotStyle: CSSProperties = {
+                  position: "absolute",
+                  inset: 0,
+                };
+                if (!visibleItem) {
+                  slotStyle = {
+                    ...slotStyle,
+                    display: "none",
+                  };
+                } else if (visibleItem.role === "from") {
+                  slotStyle = {
+                    ...slotStyle,
+                    ...aStyle,
+                    willChange:
+                      renderMode === "export" ? undefined : "transform",
+                  };
+                } else if (visibleItem.role === "to") {
+                  slotStyle = {
+                    ...slotStyle,
+                    ...bStyle,
+                    willChange:
+                      renderMode === "export" ? undefined : "transform",
+                  };
+                }
+
+                const prewarmItem = prewarmParts?.find(
+                  (item) => `${item.part.id}:${item.start}` === slot.key,
+                );
+
+                return (
+                  <div
+                    key={slot.key}
+                    style={slotStyle}
+                    aria-hidden={isVisible ? undefined : true}
+                  >
+                    <DirectCompositionGpuHost
+                      part={slot.part}
+                      localTime={
+                        visibleItem
+                          ? visibleItem.previewTime
+                          : prewarmItem
+                            ? prewarmItem.previewTime
+                            : 0
+                      }
+                      sourceSlots={
+                        visibleItem
+                          ? [visibleItem]
+                          : prewarmItem
+                            ? [prewarmItem]
+                            : undefined
+                      }
+                      backendProps={{
+                        animationsEnabled: isVisible
+                          ? animationsEnabled
+                          : false,
+                        frameScale,
+                        previewFps,
+                        hideNullObjects,
+                        isPlaying: isVisible ? isPlaying : false,
+                        duration: slot.part.duration,
+                        renderClockSceneTime: visibleItem
+                          ? visibleItem.sceneTime
+                          : prewarmItem
+                            ? slot.start + prewarmItem.previewTime
+                            : displaySceneTime,
+                        renderMode,
+                        exportTileFrameBounds,
+                      }}
+                      adjustmentLayers={adjustmentLayers}
+                      transitionLayers={transitionLayers}
+                      hostClassName="pointer-events-none absolute inset-0"
+                    />
+                  </div>
+                );
+              })}
             </div>
           ) : useDomTransitionComposite ? (
             <TransitionCompositeView

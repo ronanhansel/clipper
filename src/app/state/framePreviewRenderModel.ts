@@ -15,6 +15,7 @@ import {
   buildLinearTimeline,
   getExecutableAdjustmentLayers,
   getExecutableTransitionLayers,
+  getPreviewStackParts,
   getRenderableScene,
   getTimelinePreviewState,
   sceneDuration as getSceneDuration,
@@ -70,6 +71,7 @@ export type FramePreviewRenderModel = {
    */
   sceneMotionPart: CompositionClip;
   previewParts: TimelinePreviewStackPart[];
+  prewarmParts: TimelinePreviewStackPart[];
   previewTime: number;
   renderableScene: Scene;
   sceneDurationSeconds: number;
@@ -229,6 +231,45 @@ export function deriveFramePreviewRenderModelFromContext(
         )
       : [],
   };
+  const prewarmParts: TimelinePreviewStackPart[] = [];
+  if (sceneWrap.transitionsEnabled && transitionLayers) {
+    const prewarmWindowSeconds = 1.5;
+    for (const layer of transitionLayers) {
+      const isNearby =
+        adjustedSceneTime >= layer.start - prewarmWindowSeconds &&
+        adjustedSceneTime <=
+          layer.start + layer.duration + prewarmWindowSeconds;
+      if (isNearby) {
+        const midTime = layer.start + layer.duration / 2;
+        const fromTimeClamped = Math.min(
+          Math.max(midTime - 0.05, layer.start),
+          layer.start + layer.duration,
+        );
+        const toTimeClamped = Math.min(
+          Math.max(midTime + 0.05, layer.start),
+          layer.start + layer.duration,
+        );
+
+        const fromParts = getPreviewStackParts(
+          renderableScene.compositions,
+          timeline,
+          fromTimeClamped,
+          fromTimeClamped,
+          timelineLayerState,
+        );
+        const toParts = getPreviewStackParts(
+          renderableScene.compositions,
+          timeline,
+          toTimeClamped,
+          toTimeClamped,
+          timelineLayerState,
+        );
+
+        prewarmParts.push(...fromParts, ...toParts);
+      }
+    }
+  }
+
   return {
     activeComposition: previewState.activeComposition,
     activeTimelinePart: previewState.activeTimelinePart,
@@ -239,6 +280,7 @@ export function deriveFramePreviewRenderModelFromContext(
     sceneWrap,
     sceneMotionPart,
     previewParts: previewState.previewParts,
+    prewarmParts,
     previewTime: previewState.previewTime,
     renderableScene,
     sceneDurationSeconds,

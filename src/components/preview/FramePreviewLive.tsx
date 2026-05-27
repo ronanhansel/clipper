@@ -76,6 +76,7 @@ export const FramePreviewLive = memo(function FramePreviewLive(
     hiddenMotionLayerIds: ctxHiddenMotionLayerIds,
     motionLayers: ctxMotionLayers,
     previewParts: livePreviewParts,
+    prewarmParts: livePrewarmParts,
     transitionLayers: ctxTransitionLayers,
     transitionPreviewParts: liveTransitionPreviewParts,
     visibleAdjustmentLayers: ctxAdjustmentLayers,
@@ -93,6 +94,7 @@ export const FramePreviewLive = memo(function FramePreviewLive(
       isPostProcessSource={props.isPostProcessSource}
       {...(passthrough as ComponentProps<typeof FramePreview>)}
       previewParts={livePreviewParts}
+      prewarmParts={livePrewarmParts}
       transitionPreviewParts={liveTransitionPreviewParts}
       transitionLayers={ctxTransitionLayers}
       part={displayPart}

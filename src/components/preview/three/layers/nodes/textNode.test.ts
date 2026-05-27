@@ -24,6 +24,7 @@ vi.mock("troika-three-text", async () => {
     public lineHeight: string | number = "normal";
     public textAlign = "left";
     public maxWidth = Infinity;
+    public clipRect: [number, number, number, number] | null = null;
     public font: string | null = null;
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     public color: any = null;
@@ -49,6 +50,7 @@ type FakeTextShape = {
   lineHeight: string | number;
   textAlign: string;
   maxWidth: number;
+  clipRect: [number, number, number, number] | null;
   font: string | null;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   color: any;
@@ -202,6 +204,30 @@ describe("textNodeFactory", () => {
     expect(inner.position.x).toBe(-150);
     expect(inner.position.y).toBe(40);
     expect(inner.position.z).toBe(0);
+    node.dispose();
+  });
+
+  it("clips native text to fixed text box bounds", () => {
+    const node = textNodeFactory.create(
+      { id: "text-1" } as FrameObject,
+      NULL_CONTEXT,
+    );
+    node.update(
+      makeState({
+        bounds: { x: 0, y: 0, width: 300, height: 80 },
+        style: { textBoxLayout: "fixed" },
+      }),
+    );
+    const inner = node.object3D.children[0] as unknown as FakeTextShape;
+    expect(inner.clipRect).toEqual([0, -80, 300, 0]);
+
+    node.update(
+      makeState({
+        bounds: { x: 0, y: 0, width: 300, height: 80 },
+        style: { textBoxLayout: "overflow" },
+      }),
+    );
+    expect(inner.clipRect).toBeNull();
     node.dispose();
   });
 

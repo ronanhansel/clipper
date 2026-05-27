@@ -105,6 +105,10 @@ class TextNode implements LayerNode {
         ? state.style.textAlign
         : DEFAULT_TEXT_ALIGN;
     this.text.maxWidth = t.width;
+    this.text.clipRect =
+      state.style?.textBoxLayout === "fixed"
+        ? [0, -t.height, t.width, 0]
+        : null;
 
     this.text.font = resolveTroikaFontSource(
       state.style?.fontSource ?? state.style?.fontFamily,

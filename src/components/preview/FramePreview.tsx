@@ -54,6 +54,7 @@ import { MEDIA_PLACEHOLDER_DATA_URL } from "../../core/mediaPlaceholder";
 import { normalizeClipperMediaUrl } from "../../core/mediaSource";
 import { getMediaAssetType } from "../../core/mediaTypes";
 import { getMediaVideoTime } from "../../core/mediaVideoPlayback";
+import { hasVisibleShadow } from "../../core/effects/shadowVisibility";
 import {
   getWebCodecsVideoFrameProvider,
   type WebCodecsVideoFrameProvider,
@@ -243,6 +244,7 @@ type FramePreviewProps = {
   exportTileViewport?: ExportTileViewport;
   selectionOverlayScale?: number;
   previewParts: TimelinePreviewStackPart[];
+  prewarmParts?: TimelinePreviewStackPart[];
   transitionPreviewParts?: {
     from: TimelinePreviewStackPart[];
     to: TimelinePreviewStackPart[];
@@ -415,6 +417,9 @@ export const FramePreview = memo(function FramePreview({
       } | null;
     }
   ).transitionPreviewParts;
+  const prewarmParts = (
+    arguments[0] as { prewarmParts?: TimelinePreviewStackPart[] }
+  ).prewarmParts;
   const transitionLayers = (
     arguments[0] as { transitionLayers?: TransitionLayer[] }
   ).transitionLayers;
@@ -961,6 +966,7 @@ export const FramePreview = memo(function FramePreview({
                       frameVisualAdjustmentOverlaysRef
                     }
                     transitionPreviewParts={transitionPreviewParts ?? null}
+                    prewarmParts={prewarmParts}
                     transitionProgress={transitionProgress}
                     transitionSequenceStyle={transitionSequenceStyle}
                     stackPreviewParts={stackPreviewParts}
@@ -2855,6 +2861,9 @@ export const FrameObjectView = memo(function FrameObjectView({
       : "fixed";
   const textWrapClass =
     textBoxLayout === "overflow" ? "whitespace-pre" : "whitespace-pre-wrap";
+  const hasActiveShadow = hasVisibleShadow(evaluatedObject.shadow);
+  const shouldClipTextToBounds =
+    object.type === "text" && textBoxLayout === "fixed" && !hasActiveShadow;
   const style = {
     ...evaluatedObject.style,
     ...animation.style,
@@ -2931,10 +2940,6 @@ export const FrameObjectView = memo(function FrameObjectView({
   const editableContent = editableTextPath
     ? getTextPathEditableContent(object.content)
     : (object.content ?? "");
-  const hasActiveShadow = Boolean(
-    evaluatedObject.shadow && evaluatedObject.shadow.enabled !== false,
-  );
-
   useLayoutEffect(() => {
     const element = objectRef.current;
     if (!element || renderMode === "export") return;
@@ -3120,10 +3125,19 @@ export const FrameObjectView = memo(function FrameObjectView({
 
   if (isNullObject && renderMode === "export") return null;
 
+  const textContent = splitTextAnimations.length
+    ? renderSplitTextSegments(
+        textSegments,
+        Boolean(richText),
+        splitTextAnimations,
+        splitTextTime,
+      )
+    : renderRichTextSegments(textSegments, Boolean(richText));
+
   return (
     <div
       ref={objectRef}
-      className={`absolute flex touch-none select-none flex-col whitespace-pre-line ${textBoxLayout === "fixed" && !hasActiveShadow ? "overflow-hidden" : "overflow-visible"} ${focusPicking ? "cursor-crosshair" : (object.type === "text" || editableTextPath) && (activeShapeTool === "text" || activeShapeTool === "textPath") ? "cursor-text" : "cursor-default"} ${editing ? "select-text" : ""} ${!editing && (activeShapeTool === "text" || activeShapeTool === "textPath") && (object.type === "text" || editableTextPath) ? "hover:ring-2 hover:ring-[#159dff]/60 rounded-sm" : ""}`}
+      className={`absolute flex touch-none select-none flex-col whitespace-pre-line ${shouldClipTextToBounds ? "overflow-hidden" : "overflow-visible"} ${focusPicking ? "cursor-crosshair" : (object.type === "text" || editableTextPath) && (activeShapeTool === "text" || activeShapeTool === "textPath") ? "cursor-text" : "cursor-default"} ${editing ? "select-text" : ""} ${!editing && (activeShapeTool === "text" || activeShapeTool === "textPath") && (object.type === "text" || editableTextPath) ? "hover:ring-2 hover:ring-[#159dff]/60 rounded-sm" : ""}`}
       data-clipper-render-object-id={object.id}
       data-object-id={canSelect && !isLocked ? object.id : undefined}
       style={{
@@ -3157,7 +3171,15 @@ export const FrameObjectView = memo(function FrameObjectView({
       {(object.type === "text" || editableTextPath) && editing ? (
         <div
           ref={editableRef}
-          className={`min-h-0 w-full outline-none ${editableTextPath ? "rounded-[6px] bg-[#11141a]/80 px-2 py-1 text-center ring-2 ring-[#159dff]" : textWrapClass}`}
+          className={`min-h-0 w-full outline-none ${
+            editableTextPath
+              ? "rounded-[6px] bg-[#11141a]/80 px-2 py-1 text-center ring-2 ring-[#159dff]"
+              : textWrapClass
+          } ${
+            !editableTextPath && textBoxLayout === "fixed" && !hasActiveShadow
+              ? "max-w-full max-h-full overflow-hidden"
+              : ""
+          }`}
           contentEditable
           suppressContentEditableWarning
           onBlur={finishTextEdit}
@@ -3177,15 +3199,10 @@ export const FrameObjectView = memo(function FrameObjectView({
         />
       ) : null}
       {object.type === "text" && !editing ? (
-        <div className={`min-h-0 w-full ${textWrapClass}`}>
-          {splitTextAnimations.length
-            ? renderSplitTextSegments(
-                textSegments,
-                Boolean(richText),
-                splitTextAnimations,
-                splitTextTime,
-              )
-            : renderRichTextSegments(textSegments, Boolean(richText))}
+        <div
+          className={`min-h-0 w-full ${shouldClipTextToBounds ? "max-h-full overflow-hidden" : ""} ${textWrapClass}`}
+        >
+          {textContent}
         </div>
       ) : null}
       {object.type === "svg" && content && !(editableTextPath && editing) ? (

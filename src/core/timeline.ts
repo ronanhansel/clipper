@@ -542,7 +542,7 @@ export function getTimelinePreviewState({
   };
 }
 
-function getPreviewStackParts(
+export function getPreviewStackParts(
   compositions: CompositionClip[],
   timeline: TimelinePart[],
   lookupTime: number,
