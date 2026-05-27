@@ -171,8 +171,10 @@ export function Input({
       input.blur();
       window.getSelection()?.removeAllRanges();
       input.style.cursor = "none";
+      const pointerLock = requestNumberScrubPointerLock(input.ownerDocument);
       scrubRef.current = {
         ...pending,
+        pointerLock,
         commitState: createThrottledCommitState<number>(),
         initialInputCursor,
         remainder: initialRemainder,
@@ -324,7 +326,7 @@ export function Input({
       originX: event.clientX,
       originY: event.clientY,
       pointerId: event.pointerId,
-      pointerLock: requestNumberScrubPointerLock(input.ownerDocument),
+      pointerLock: null,
       step,
       throttleMs: Math.max(0, numberScrubCommitThrottleMs),
       value,

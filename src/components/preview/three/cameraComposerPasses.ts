@@ -14,6 +14,7 @@ import {
   smoothstep,
   step,
   tan,
+  uniform,
   uv,
   vec2,
   vec3,
@@ -217,31 +218,77 @@ export function createCameraLensNode(
   const u = pass.uniforms;
   const mask = u.chromaticAberrationMask;
   const resolution = vec2(frameSize.width, frameSize.height);
-  const focus = vec2(u.focus.x, u.focus.y);
-  const radiusPixels = float(u.radiusPixels);
-  const softness = float(u.softness);
-  const magnification = float(u.magnification);
-  const distortion = float(u.distortion);
-  const chromaticAberrationPixels = float(u.chromaticAberrationPixels);
-  const rimWidth = float(u.rimWidth);
-  const rimOpacity = float(u.rimOpacity);
-  const dimAmount = float(u.dimAmount);
-  const frameBackground = vec3(
-    u.frameBackground.r,
-    u.frameBackground.g,
-    u.frameBackground.b,
+  const focus = uniform(new THREE.Vector2(u.focus.x, u.focus.y));
+  const radiusPixels = uniform(u.radiusPixels);
+  const softness = uniform(u.softness);
+  const magnification = uniform(u.magnification);
+  const distortion = uniform(u.distortion);
+  const chromaticAberrationPixels = uniform(u.chromaticAberrationPixels);
+  const rimWidth = uniform(u.rimWidth);
+  const rimOpacity = uniform(u.rimOpacity);
+  const dimAmount = uniform(u.dimAmount);
+  const frameBackground = uniform(
+    new THREE.Vector3(
+      u.frameBackground.r,
+      u.frameBackground.g,
+      u.frameBackground.b,
+    ),
   );
-  const chromaMaskEnabled = float(mask.enabled ? 1 : 0);
-  const chromaMaskPreview = float(mask.preview ? 1 : 0);
-  const chromaMaskApplyInside = float(mask.applyInside ? 1 : 0);
-  const chromaMaskFocus = vec2(mask.focus.x, mask.focus.y);
-  const chromaMaskRadius = vec2(mask.radiusX, mask.radiusY);
-  const chromaMaskFeather = float(mask.feather);
+  const chromaMaskEnabled = uniform(mask.enabled ? 1 : 0);
+  const chromaMaskPreview = uniform(mask.preview ? 1 : 0);
+  const chromaMaskApplyInside = uniform(mask.applyInside ? 1 : 0);
+  const chromaMaskFocus = uniform(
+    new THREE.Vector2(mask.focus.x, mask.focus.y),
+  );
+  const chromaMaskRadius = uniform(
+    new THREE.Vector2(mask.radiusX, mask.radiusY),
+  );
+  const chromaMaskFeather = uniform(mask.feather);
   const previewRgb = vec3(
     shapeMaskPreviewRgb.r,
     shapeMaskPreviewRgb.g,
     shapeMaskPreviewRgb.b,
   );
+
+  (
+    pass as LensPostProcessPass & {
+      gpuUniformNodes?: {
+        focus: { value: InstanceType<typeof THREE.Vector2> };
+        radiusPixels: { value: number };
+        softness: { value: number };
+        magnification: { value: number };
+        distortion: { value: number };
+        chromaticAberrationPixels: { value: number };
+        rimWidth: { value: number };
+        rimOpacity: { value: number };
+        dimAmount: { value: number };
+        frameBackground: { value: InstanceType<typeof THREE.Vector3> };
+        chromaMaskEnabled: { value: number };
+        chromaMaskPreview: { value: number };
+        chromaMaskApplyInside: { value: number };
+        chromaMaskFocus: { value: InstanceType<typeof THREE.Vector2> };
+        chromaMaskRadius: { value: InstanceType<typeof THREE.Vector2> };
+        chromaMaskFeather: { value: number };
+      };
+    }
+  ).gpuUniformNodes = {
+    focus,
+    radiusPixels,
+    softness,
+    magnification,
+    distortion,
+    chromaticAberrationPixels,
+    rimWidth,
+    rimOpacity,
+    dimAmount,
+    frameBackground,
+    chromaMaskEnabled,
+    chromaMaskPreview,
+    chromaMaskApplyInside,
+    chromaMaskFocus,
+    chromaMaskRadius,
+    chromaMaskFeather,
+  };
 
   return Fn(() => {
     const lensUv = uv();
@@ -321,11 +368,29 @@ export function createCameraDofModeNode(
   const sourceTexture = convertToTexture(sourceNode);
   const u = pass.uniforms;
   const resolution = vec2(frameSize.width, frameSize.height);
-  const sensorHeight = float(u.sensorHeight);
-  const fov = float(u.fov);
-  const focusDistance = float(Math.max(u.focusDistance, 0.001));
-  const fNumber = float(Math.max(u.fNumber, 0.1));
-  const maxBlurPx = float(Math.max(u.maxBlurPx, 1));
+  const sensorHeight = uniform(u.sensorHeight);
+  const fov = uniform(u.fov);
+  const focusDistance = uniform(Math.max(u.focusDistance, 0.001));
+  const fNumber = uniform(Math.max(u.fNumber, 0.1));
+  const maxBlurPx = uniform(Math.max(u.maxBlurPx, 1));
+
+  (
+    pass as CameraDofPass & {
+      gpuUniformNodes?: {
+        sensorHeight: { value: number };
+        fov: { value: number };
+        focusDistance: { value: number };
+        fNumber: { value: number };
+        maxBlurPx: { value: number };
+      };
+    }
+  ).gpuUniformNodes = {
+    sensorHeight,
+    fov,
+    focusDistance,
+    fNumber,
+    maxBlurPx,
+  };
   const blurMode = dofBlurModeToUniform(u.blurMode);
   const debug = u.debug ? 1 : 0;
   const goldenAngle = float(2.39996323);
@@ -981,4 +1046,63 @@ function cloneUniformMap<T extends Record<string, { value: unknown }>>(
     };
   }
   return cloned as T;
+}
+
+export function applyGpuCameraDofUniforms(
+  targetPass: CameraDofPass | null,
+  sourcePass: CameraDofPass | null,
+) {
+  if (!targetPass || !sourcePass) return;
+  const nodes = (targetPass as CameraDofPass & { gpuUniformNodes?: any })
+    .gpuUniformNodes;
+  if (!nodes || typeof nodes !== "object") return;
+
+  const u = sourcePass.uniforms;
+  if ("sensorHeight" in nodes) nodes.sensorHeight.value = u.sensorHeight;
+  if ("fov" in nodes) nodes.fov.value = u.fov;
+  if ("focusDistance" in nodes)
+    nodes.focusDistance.value = Math.max(u.focusDistance, 0.001);
+  if ("fNumber" in nodes) nodes.fNumber.value = Math.max(u.fNumber, 0.1);
+  if ("maxBlurPx" in nodes) nodes.maxBlurPx.value = Math.max(u.maxBlurPx, 1);
+}
+
+export function applyGpuCameraLensUniforms(
+  targetPass: LensPostProcessPass | null,
+  sourcePass: LensPostProcessPass | null,
+) {
+  if (!targetPass || !sourcePass) return;
+  const nodes = (targetPass as LensPostProcessPass & { gpuUniformNodes?: any })
+    .gpuUniformNodes;
+  if (!nodes || typeof nodes !== "object") return;
+
+  const u = sourcePass.uniforms;
+  const mask = u.chromaticAberrationMask;
+  if ("focus" in nodes) nodes.focus.value.set(u.focus.x, u.focus.y);
+  if ("radiusPixels" in nodes) nodes.radiusPixels.value = u.radiusPixels;
+  if ("softness" in nodes) nodes.softness.value = u.softness;
+  if ("magnification" in nodes) nodes.magnification.value = u.magnification;
+  if ("distortion" in nodes) nodes.distortion.value = u.distortion;
+  if ("chromaticAberrationPixels" in nodes)
+    nodes.chromaticAberrationPixels.value = u.chromaticAberrationPixels;
+  if ("rimWidth" in nodes) nodes.rimWidth.value = u.rimWidth;
+  if ("rimOpacity" in nodes) nodes.rimOpacity.value = u.rimOpacity;
+  if ("dimAmount" in nodes) nodes.dimAmount.value = u.dimAmount;
+  if ("frameBackground" in nodes)
+    nodes.frameBackground.value.set(
+      u.frameBackground.r,
+      u.frameBackground.g,
+      u.frameBackground.b,
+    );
+  if ("chromaMaskEnabled" in nodes)
+    nodes.chromaMaskEnabled.value = mask.enabled ? 1 : 0;
+  if ("chromaMaskPreview" in nodes)
+    nodes.chromaMaskPreview.value = mask.preview ? 1 : 0;
+  if ("chromaMaskApplyInside" in nodes)
+    nodes.chromaMaskApplyInside.value = mask.applyInside ? 1 : 0;
+  if ("chromaMaskFocus" in nodes)
+    nodes.chromaMaskFocus.value.set(mask.focus.x, mask.focus.y);
+  if ("chromaMaskRadius" in nodes)
+    nodes.chromaMaskRadius.value.set(mask.radiusX, mask.radiusY);
+  if ("chromaMaskFeather" in nodes)
+    nodes.chromaMaskFeather.value = mask.feather;
 }

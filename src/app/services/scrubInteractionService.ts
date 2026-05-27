@@ -205,6 +205,20 @@ export function requestNumberScrubPointerLock(
 
   let released = false;
 
+  const exitLock = () => {
+    if (doc.pointerLockElement) {
+      doc.exitPointerLock();
+    }
+  };
+
+  const delayExit = () => {
+    // A short 20ms timeout allows the browser's pointer lock state
+    // transitions to fully settle before executing the unlock command,
+    // which prevents the browser from ignoring exitPointerLock() during
+    // rapid repetitive locking/unlocking.
+    setTimeout(exitLock, 20);
+  };
+
   // Already locked from a previous scrub — reuse, don't re-request.
   // Calling requestPointerLock() while locked triggers pointerlockerror,
   // which would schedule exit mid-scrub.
@@ -214,13 +228,32 @@ export function requestNumberScrubPointerLock(
       release: () => {
         if (released) return;
         released = true;
-        if (doc.pointerLockElement) doc.exitPointerLock();
+        if (doc.pointerLockElement) delayExit();
       },
     };
   }
 
+  function cleanup() {
+    doc.removeEventListener("pointerlockchange", handleLockChange, false);
+    doc.removeEventListener("pointerlockerror", onPointerError, false);
+  }
+
+  function handleLockChange() {
+    if (released) {
+      if (doc.pointerLockElement) {
+        delayExit();
+      }
+      cleanup();
+    } else {
+      if (!doc.pointerLockElement) {
+        cleanup();
+      }
+    }
+  }
+
   function onPointerError(event: Event) {
     console.error("PointerLock error occurred:", event);
+    cleanup();
   }
 
   try {
@@ -229,14 +262,18 @@ export function requestNumberScrubPointerLock(
     return null;
   }
 
+  doc.addEventListener("pointerlockchange", handleLockChange, false);
   doc.addEventListener("pointerlockerror", onPointerError, false);
+
   return {
     locked: () => !released && doc.pointerLockElement !== null,
     release: () => {
       if (released) return;
       released = true;
-      doc.removeEventListener("pointerlockerror", onPointerError, false);
-      if (doc.pointerLockElement) doc.exitPointerLock();
+      if (doc.pointerLockElement) {
+        delayExit();
+        cleanup();
+      }
     },
   };
 }

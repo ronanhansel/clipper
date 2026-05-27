@@ -1,8 +1,5 @@
-import type { ComponentProps } from "react";
 import type { FrameObject, LightObjectKind } from "../../../core/types";
 import { DEFAULT_LIGHT_OBJECT_PROPS } from "../../../core/types";
-import { ColorSelector } from "../../ColorSelector";
-import { Input } from "../../ui/input";
 import {
   Select,
   SelectContent,
@@ -12,6 +9,18 @@ import {
 } from "../../ui/select";
 import { Switch } from "../../ui/switch";
 import { useObjectInspector } from "../objectInspectorContext";
+import { KeyframableNumberInput } from "../KeyframableNumberInput";
+import { KeyframedColorInput } from "../KeyframedColorInput";
+import {
+  getPropertyTrackKeyframeAtTime,
+  hasPropertyTrack,
+} from "../inspectorShared";
+import {
+  removePropertyKeyframe,
+  upsertPropertyKeyframe,
+  evaluateObjectState,
+  setPropertyBaseValue,
+} from "../../../core/propertyRegistry";
 
 const LIGHT_KIND_OPTIONS: Array<{ value: LightObjectKind; label: string }> = [
   { value: "directional", label: "Directional" },
@@ -21,38 +30,86 @@ const LIGHT_KIND_OPTIONS: Array<{ value: LightObjectKind; label: string }> = [
 ];
 
 export function LightObjectSection() {
-  const { object, onChange, onPreview } = useObjectInspector();
-  const props = {
-    ...DEFAULT_LIGHT_OBJECT_PROPS,
-    ...(object.props ?? {}),
-  };
-  const kind = readLightKind(props.kind);
+  const { object, onChange, onPreview, readEffectiveTime } =
+    useObjectInspector();
 
-  function updateProps(
-    updater: (props: Record<string, unknown>) => void,
-    preview = false,
-  ) {
-    const apply = preview && onPreview ? onPreview : onChange;
-    apply((current: FrameObject) => {
-      const nextProps = { ...(current.props ?? {}) };
-      updater(nextProps);
-      return { ...current, props: nextProps };
-    });
+  const evaluated = evaluateObjectState(object, readEffectiveTime());
+  const liveProps = {
+    ...DEFAULT_LIGHT_OBJECT_PROPS,
+    ...(evaluated.props ?? {}),
+  };
+  const kind = readLightKind(liveProps.kind);
+
+  function isKeyframedNow(path: string) {
+    const time = readEffectiveTime();
+    return Boolean(getPropertyTrackKeyframeAtTime(object, path, time));
   }
 
-  function setNumber(key: "intensity" | "range" | "angle" | "softness") {
-    return (value: string | number, preview = false) => {
-      const numeric = Number(value);
-      if (!Number.isFinite(numeric)) return;
-      updateProps((next) => {
-        next[key] =
-          key === "angle"
-            ? clamp(numeric, 1, 175)
-            : key === "softness"
-              ? clamp(numeric, 0.001, 1)
-              : Math.max(0, numeric);
-      }, preview);
-    };
+  function toggleKeyframe(path: string, defaultValue: any) {
+    const time = readEffectiveTime();
+    const existing = getPropertyTrackKeyframeAtTime(object, path, time);
+    if (existing) {
+      onChange((current) =>
+        removePropertyKeyframe(current, path, existing.time, time),
+      );
+    } else {
+      const key = path.slice("props.".length) as keyof typeof liveProps;
+      const val = liveProps[key] !== undefined ? liveProps[key] : defaultValue;
+      onChange((current) => upsertPropertyKeyframe(current, path, time, val));
+    }
+  }
+
+  function clampForPath(path: string, value: number): number {
+    if (path === "props.angle") return clamp(value, 1, 175);
+    if (path === "props.softness") return clamp(value, 0.001, 1);
+    if (path === "props.intensity") return Math.max(0, value);
+    if (path === "props.range") return Math.max(1, value);
+    return value;
+  }
+
+  function commitNumber(path: string, value: number) {
+    const clamped = clampForPath(path, value);
+    if (hasPropertyTrack(object, path)) {
+      const time = readEffectiveTime();
+      onChange((current) =>
+        upsertPropertyKeyframe(current, path, time, clamped),
+      );
+    } else {
+      onChange((current) => setPropertyBaseValue(current, path, clamped));
+    }
+  }
+
+  function previewNumber(path: string, value: number) {
+    const clamped = clampForPath(path, value);
+    if (onPreview) {
+      onPreview((current) => setPropertyBaseValue(current, path, clamped));
+    }
+  }
+
+  function commitColor(value: string) {
+    const path = "props.color";
+    if (hasPropertyTrack(object, path)) {
+      const time = readEffectiveTime();
+      onChange((current) => upsertPropertyKeyframe(current, path, time, value));
+    } else {
+      onChange((current) => setPropertyBaseValue(current, path, value));
+    }
+  }
+
+  function previewColor(value: string) {
+    const path = "props.color";
+    if (onPreview) {
+      onPreview((current) => setPropertyBaseValue(current, path, value));
+    }
+  }
+
+  function commitBoolean(path: string, value: boolean) {
+    if (hasPropertyTrack(object, path)) {
+      const time = readEffectiveTime();
+      onChange((current) => upsertPropertyKeyframe(current, path, time, value));
+    } else {
+      onChange((current) => setPropertyBaseValue(current, path, value));
+    }
   }
 
   return (
@@ -62,12 +119,16 @@ export function LightObjectSection() {
         <Select
           value={kind}
           onValueChange={(value) =>
-            updateProps((next) => {
-              next.kind = readLightKind(value);
-              next.castShadow =
-                value === "directional" ||
-                value === "spot" ||
-                value === "point";
+            onChange((current: FrameObject) => {
+              const nextProps = {
+                ...(current.props ?? {}),
+                kind: readLightKind(value),
+                castShadow:
+                  value === "directional" ||
+                  value === "spot" ||
+                  value === "point",
+              };
+              return { ...current, props: nextProps };
             })
           }
         >
@@ -85,115 +146,126 @@ export function LightObjectSection() {
       </div>
 
       <div className="grid grid-cols-2 gap-2">
-        <LightInput
-          label="Intensity"
-          type="number"
-          value={readNumber(props.intensity, 1)}
-          min={0}
-          step={0.05}
-          onCommit={setNumber("intensity")}
-          onPreview={setNumber("intensity")}
-        />
-        {kind === "point" || kind === "spot" ? (
-          <LightInput
-            label="Range"
-            type="number"
-            value={readNumber(props.range, 1200)}
-            min={1}
-            step={10}
-            onCommit={setNumber("range")}
-            onPreview={setNumber("range")}
+        <label className="grid gap-1.5">
+          <span className="text-[11px] font-medium text-[#9aa3b6]">
+            Intensity
+          </span>
+          <KeyframableNumberInput
+            ariaLabel="Intensity"
+            unitPrefix=""
+            step={0.05}
+            min={0}
+            value={readNumber(liveProps.intensity, 1)}
+            active={isKeyframedNow("props.intensity")}
+            onCommit={(val) => commitNumber("props.intensity", val)}
+            onPreview={(val) => previewNumber("props.intensity", val)}
+            onToggleKeyframe={() => toggleKeyframe("props.intensity", 1)}
           />
+        </label>
+        {kind === "point" || kind === "spot" ? (
+          <label className="grid gap-1.5">
+            <span className="text-[11px] font-medium text-[#9aa3b6]">
+              Range
+            </span>
+            <KeyframableNumberInput
+              ariaLabel="Range"
+              unitPrefix=""
+              step={10}
+              min={1}
+              value={readNumber(liveProps.range, 1200)}
+              active={isKeyframedNow("props.range")}
+              onCommit={(val) => commitNumber("props.range", val)}
+              onPreview={(val) => previewNumber("props.range", val)}
+              onToggleKeyframe={() => toggleKeyframe("props.range", 1200)}
+            />
+          </label>
         ) : null}
         {kind === "spot" ? (
           <>
-            <LightInput
-              label="Angle"
-              type="number"
-              value={readNumber(props.angle, 45)}
-              min={1}
-              max={175}
-              step={1}
-              onCommit={setNumber("angle")}
-              onPreview={setNumber("angle")}
-            />
-            <LightInput
-              label="Softness"
-              type="number"
-              value={readNumber(props.softness, 0.25)}
-              min={0.001}
-              max={1}
-              step={0.01}
-              onCommit={setNumber("softness")}
-              onPreview={setNumber("softness")}
-            />
+            <label className="grid gap-1.5">
+              <span className="text-[11px] font-medium text-[#9aa3b6]">
+                Angle
+              </span>
+              <KeyframableNumberInput
+                ariaLabel="Angle"
+                unitPrefix=""
+                step={1}
+                min={1}
+                max={175}
+                value={readNumber(liveProps.angle, 45)}
+                active={isKeyframedNow("props.angle")}
+                onCommit={(val) => commitNumber("props.angle", val)}
+                onPreview={(val) => previewNumber("props.angle", val)}
+                onToggleKeyframe={() => toggleKeyframe("props.angle", 45)}
+              />
+            </label>
+            <label className="grid gap-1.5">
+              <span className="text-[11px] font-medium text-[#9aa3b6]">
+                Softness
+              </span>
+              <KeyframableNumberInput
+                ariaLabel="Softness"
+                unitPrefix=""
+                step={0.01}
+                min={0.001}
+                max={1}
+                value={readNumber(liveProps.softness, 0.25)}
+                active={isKeyframedNow("props.softness")}
+                onCommit={(val) => commitNumber("props.softness", val)}
+                onPreview={(val) => previewNumber("props.softness", val)}
+                onToggleKeyframe={() => toggleKeyframe("props.softness", 0.25)}
+              />
+            </label>
           </>
         ) : null}
       </div>
 
       {kind === "directional" || kind === "spot" || kind === "point" ? (
-        <div className="grid grid-cols-[1fr_auto] items-center gap-3">
-          <label className="text-[11px] font-medium text-[#9aa3b6]">
-            Cast Shadows
-          </label>
-          <Switch
-            checked={Boolean(props.castShadow)}
-            onCheckedChange={(checked) =>
-              updateProps((next) => {
-                next.castShadow = checked;
-              })
-            }
-          />
-        </div>
+        <KeyframableBooleanSwitch
+          label="Cast Shadows"
+          path="props.castShadow"
+          value={Boolean(liveProps.castShadow)}
+          active={isKeyframedNow("props.castShadow")}
+          onToggleKeyframe={() => toggleKeyframe("props.castShadow", true)}
+          onCheckedChange={(checked) =>
+            commitBoolean("props.castShadow", checked)
+          }
+        />
       ) : null}
 
       {kind === "point" || kind === "spot" ? (
-        <div className="grid grid-cols-[1fr_auto] items-center gap-3">
-          <label className="text-[11px] font-medium text-[#9aa3b6]">
-            Show Range
-          </label>
-          <Switch
-            checked={props.showRange !== false}
-            onCheckedChange={(checked) =>
-              updateProps((next) => {
-                next.showRange = checked;
-              })
-            }
-          />
-        </div>
-      ) : null}
-
-      <div className="grid grid-cols-[1fr_auto] items-center gap-3">
-        <label className="text-[11px] font-medium text-[#9aa3b6]">Debug</label>
-        <Switch
-          checked={props.debug !== false}
+        <KeyframableBooleanSwitch
+          label="Show Range"
+          path="props.showRange"
+          value={liveProps.showRange !== false}
+          active={isKeyframedNow("props.showRange")}
+          onToggleKeyframe={() => toggleKeyframe("props.showRange", true)}
           onCheckedChange={(checked) =>
-            updateProps((next) => {
-              next.debug = checked;
-            })
+            commitBoolean("props.showRange", checked)
           }
         />
-      </div>
+      ) : null}
+
+      <KeyframableBooleanSwitch
+        label="Debug"
+        path="props.debug"
+        value={liveProps.debug !== false}
+        active={isKeyframedNow("props.debug")}
+        onToggleKeyframe={() => toggleKeyframe("props.debug", true)}
+        onCheckedChange={(checked) => commitBoolean("props.debug", checked)}
+      />
 
       {kind !== "ambient" ? (
         <div className="grid gap-1.5">
-          <label className="text-[11px] font-medium text-[#9aa3b6]">
-            Color
-          </label>
-          <ColorSelector
-            value={typeof props.color === "string" ? props.color : "#fff4d6"}
-            onChange={(value) =>
-              updateProps((next) => {
-                next.color = value;
-              })
+          <KeyframedColorInput
+            label="Color"
+            value={
+              typeof liveProps.color === "string" ? liveProps.color : "#fff4d6"
             }
-            onPreview={(value) =>
-              updateProps((next) => {
-                next.color = value;
-              }, true)
-            }
-            variant="default"
-            pickerMode="solid"
+            hasKeyframe={isKeyframedNow("props.color")}
+            onToggleKeyframe={() => toggleKeyframe("props.color", "#fff4d6")}
+            onChange={commitColor}
+            onPreview={previewColor}
           />
         </div>
       ) : null}
@@ -201,29 +273,51 @@ export function LightObjectSection() {
   );
 }
 
-function LightInput({
+interface KeyframableBooleanSwitchProps {
+  label: string;
+  path: string;
+  value: boolean;
+  active: boolean;
+  onToggleKeyframe: () => void;
+  onCheckedChange: (checked: boolean) => void;
+}
+
+function KeyframableBooleanSwitch({
   label,
   value,
-  onCommit,
-  onPreview,
-  ...props
-}: {
-  label: string;
-  value: number;
-  onCommit: (value: string | number, preview?: boolean) => void;
-  onPreview: (value: string | number, preview?: boolean) => void;
-} & Omit<ComponentProps<typeof Input>, "value" | "onChange">) {
+  active,
+  onToggleKeyframe,
+  onCheckedChange,
+}: KeyframableBooleanSwitchProps) {
   return (
-    <label className="grid gap-1.5">
+    <label className="flex items-center justify-between gap-3 text-xs font-semibold text-[#dfe2ea]">
       <span className="text-[11px] font-medium text-[#9aa3b6]">{label}</span>
-      <Input
-        {...props}
-        value={value}
-        numberScrubMode="preview"
-        onChange={(event) => onCommit(event.target.value)}
-        onNumberScrubCommit={(next) => onCommit(next)}
-        onNumberScrubPreview={(next) => onPreview(next, true)}
-      />
+      <span className="flex items-center gap-3">
+        <button
+          aria-label={
+            active
+              ? `Remove ${label} keyframe at playhead`
+              : `Add ${label} keyframe at playhead`
+          }
+          aria-pressed={active}
+          className={`h-2 w-2 rotate-45 rounded-[1px] border transition hover:scale-125 ${
+            active
+              ? "border-white bg-white shadow-[0_0_0_1px_rgba(255,255,255,0.16)]"
+              : "border-[#6f7684] bg-[#12151d] hover:border-white"
+          }`}
+          type="button"
+          onMouseDown={(event) => event.preventDefault()}
+          onClick={(event) => {
+            event.preventDefault();
+            onToggleKeyframe();
+          }}
+        />
+        <Switch
+          aria-label={`Toggle ${label}`}
+          checked={value}
+          onCheckedChange={onCheckedChange}
+        />
+      </span>
     </label>
   );
 }

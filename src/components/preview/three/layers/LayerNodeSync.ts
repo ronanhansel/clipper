@@ -417,7 +417,7 @@ function lightStateFromObject(object: FrameObject, localTime: number) {
     evaluated.transform && typeof evaluated.transform === "object"
       ? evaluated.transform
       : {};
-  const props = object.props ?? {};
+  const props = evaluated.props ?? {};
   const kind = readLightKind(props.kind);
   const position = {
     x: evaluated.bounds.x - FRAME_WIDTH / 2 + evaluated.bounds.width / 2,

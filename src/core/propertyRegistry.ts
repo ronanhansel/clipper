@@ -721,11 +721,16 @@ function createDynamicPropsDefinition(
   const valueType =
     path === "props.live" ||
     path === "props.autoFocus.rackFocus" ||
-    path === "props.video.playing"
+    path === "props.video.playing" ||
+    path === "props.castShadow" ||
+    path === "props.showRange" ||
+    path === "props.debug"
       ? "boolean"
       : path === "props.autoFocus.targetId" || path === "props.autoFocus.ease"
         ? "discrete"
-        : "number";
+        : path === "props.color"
+          ? "color"
+          : "number";
   // Treat numeric `props.*` leaves as number tracks so interpolation works.
   // Boolean props hold their previous value until the next keyframe.
   return {
@@ -734,12 +739,15 @@ function createDynamicPropsDefinition(
     group: "props",
     getBaseValue: readNested,
     setBaseValue: writeNested,
-    interpolate: (from, to, progress) =>
-      typeof from === "number" && typeof to === "number"
-        ? from + (to - from) * progress
-        : progress >= 1
-          ? to
-          : from,
+    interpolate:
+      valueType === "color"
+        ? interpolateColor
+        : (from, to, progress) =>
+            typeof from === "number" && typeof to === "number"
+              ? from + (to - from) * progress
+              : progress >= 1
+                ? to
+                : from,
   };
 }
 

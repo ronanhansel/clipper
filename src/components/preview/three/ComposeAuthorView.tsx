@@ -798,7 +798,9 @@ export function ComposeAuthorView(props: ComposeAuthorViewProps) {
                 }
               }
               const value =
-                item.props && typeof item.props === "object" ? item.props : {};
+                evaluated.props && typeof evaluated.props === "object"
+                  ? evaluated.props
+                  : {};
               const targetValue =
                 item.id === objectId &&
                 (nextTransform.bounds || nextTransform.translateZ !== undefined)
@@ -924,8 +926,8 @@ export function ComposeAuthorView(props: ComposeAuthorViewProps) {
               ? evaluated.transform
               : {};
           const value =
-            object.props && typeof object.props === "object"
-              ? object.props
+            evaluated.props && typeof evaluated.props === "object"
+              ? evaluated.props
               : {};
           return {
             id: object.id,

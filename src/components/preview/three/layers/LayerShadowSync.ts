@@ -856,11 +856,11 @@ function findShadowLight(
 ): ShadowLight | null {
   for (const object of part.objects) {
     if (object.type !== "light" || object.hidden) continue;
-    const props = object.props ?? {};
+    const state = evaluateObjectState(object, localTime);
+    const props = state.props ?? {};
     if (props.castShadow === false) continue;
     const kind = readLightKind(props.kind);
     if (kind !== "directional" && kind !== "spot" && kind !== "point") continue;
-    const state = evaluateObjectState(object, localTime);
     const t = resolveLayerTransform(state);
     const transform =
       state.transform && typeof state.transform === "object"
