@@ -67,6 +67,12 @@ export type CompositionInteractionBackendProps = {
     event: ReactMouseEvent<HTMLDivElement>,
     object: FrameObject,
   ) => void;
+  compositionLibrary?: CompositionClip[];
+  compositionAncestors?: readonly string[];
+  onSubcompositionDoubleClick?: (
+    compositionId: string,
+    sourceObjectId?: string | null,
+  ) => void;
 };
 
 export type CompositionBackendProps = CompositionRenderBackendProps &

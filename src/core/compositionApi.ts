@@ -12,6 +12,7 @@ export type FrameObjectType =
   | "light"
   | "custom-renderer"
   | "pattern2d"
+  | "composition"
   | "code";
 
 export type RenderContext = {

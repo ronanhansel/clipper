@@ -28,7 +28,11 @@ import {
   usePickingOrchestration,
   type UpdateMotionMarkerFn,
 } from "./app/features/picking/usePickingOrchestration";
-import { normalizeProjectBin } from "./app/features/file-manager/projectBinMutations";
+import {
+  addCompositionBinItemInProject,
+  normalizeProjectBin,
+} from "./app/features/file-manager/projectBinMutations";
+import { createCompositionInLibrary } from "./app/features/file-manager/compositionLibraryMutations";
 import { useBinProjectActions } from "./app/features/file-manager/useBinProjectActions";
 import { useFrameInteractionController } from "./app/features/frame-interactions/useFrameInteractionController";
 import { useFrameInteractionEffects } from "./app/features/frame-interactions/useFrameInteractionEffects";
@@ -61,7 +65,10 @@ import { useMotionMarkerCommands } from "./app/features/timeline/useMotionMarker
 import { useTimelineClipboardCommands } from "./app/features/timeline/useTimelineClipboardCommands";
 import { useTimelineProjectActions } from "./app/features/timeline/useTimelineProjectActions";
 import { useTimelineSelectionCommands } from "./app/features/timeline/useTimelineSelectionCommands";
-import { getDisplayNameFromPath } from "./core/fileNames";
+import {
+  getDisplayNameFromPath,
+  nextNumberedSemanticName,
+} from "./core/fileNames";
 import { resolveProjectPreviewFps } from "./core/previewFps";
 import {
   useActiveProjectBoot,
@@ -96,7 +103,10 @@ import {
   usePrerenderSettings,
 } from "./app/features/preview/usePrerenderSettings";
 import { useExportSettings } from "./app/features/export/useExportSettings";
-import { getFramePreviewTimelineLayers } from "./app/state/framePreviewRenderModel";
+import {
+  deriveFramePreviewSceneContext,
+  getFramePreviewTimelineLayers,
+} from "./app/state/framePreviewRenderModel";
 import {
   EditorStoreProvider,
   useEditorStore,
@@ -127,6 +137,7 @@ import {
   defaultTimelineMode,
   defaultTimelineViewportState,
   emptyTimelineLayerState,
+  replacePartInProject,
 } from "./core/project";
 import {
   getExecutableAdjustmentLayers,
@@ -140,6 +151,7 @@ import {
 import { type EaseValue, getEaseControlPoints } from "./core/easing";
 import {
   FRAME_HEIGHT,
+  FRAME_WIDTH,
   type CameraObjectProps,
   type EditorState,
   type FrameObject,
@@ -189,6 +201,11 @@ function readCameraPropAtPath(
 }
 
 const DRAG_KEYFRAME_EPSILON = 1e-5;
+
+type ComposeDrillEntry = {
+  compositionId: string;
+  sourceObjectId: string | null;
+};
 
 function dragValueChanged(before: number, after: number): boolean {
   return (
@@ -738,14 +755,112 @@ function AppContent({
     timelineMode,
   });
   const composeMode = timelineMode === "compose";
+  const compositionLibrary = project.compositionLibrary ?? [];
+  const [composeDrillStack, setComposeDrillStack] = useState<
+    ComposeDrillEntry[]
+  >([]);
+  const composeDrillCompositionId = composeMode
+    ? composeDrillStack.at(-1)?.compositionId
+    : undefined;
+  const composeDrillPart = useMemo(
+    () =>
+      composeDrillCompositionId
+        ? (compositionLibrary.find(
+            (item) =>
+              item.id === composeDrillCompositionId ||
+              item.compositionId === composeDrillCompositionId,
+          ) ?? null)
+        : null,
+    [composeDrillCompositionId, compositionLibrary],
+  );
+  const activeComposePart = composeDrillPart ?? part;
+  const activeComposePreviewTime = composeDrillPart
+    ? clamp(previewTime, 0, composeDrillPart.duration)
+    : previewTime;
+  const activeComposePreviewParts = composeDrillPart
+    ? [
+        {
+          part: activeComposePart,
+          start: 0,
+          previewTime: activeComposePreviewTime,
+        },
+      ]
+    : previewParts;
+  const activeComposeSceneMotionPart = composeDrillPart
+    ? activeComposePart
+    : sceneMotionPart;
+  const activeComposeDisplayPartStart = composeDrillPart ? 0 : displayPartStart;
+  const activeComposePreviewSceneContext = useMemo(() => {
+    if (!composeDrillPart) return previewSceneContext;
+    const drillPreviewTime = clamp(previewTime, 0, composeDrillPart.duration);
+    const drillPartStart = currentSceneTime - drillPreviewTime;
+    return deriveFramePreviewSceneContext({
+      blankPart: previewSceneContext.blankPart,
+      scene: {
+        id: `${composeDrillPart.id}-compose-drill`,
+        compositions: [
+          {
+            ...composeDrillPart,
+            start: drillPartStart,
+          },
+        ],
+      },
+      timelineMode,
+    });
+  }, [
+    composeDrillPart,
+    currentSceneTime,
+    previewSceneContext,
+    previewTime,
+    timelineMode,
+  ]);
+  const activeComposeTimelinePart = composeDrillPart
+    ? null
+    : activeTimelinePart;
+  const activeComposeSelectedObject = useMemo(
+    () =>
+      activeComposePart.objects.find(
+        (object) => object.id === selectedObjectId,
+      ) ??
+      activeComposePart.background.elements.find(
+        (object) => object.id === selectedObjectId,
+      ) ??
+      (selectedObjectId === activeComposePart.background.id
+        ? frameObjectFromBackgroundLayer(activeComposePart.background)
+        : selectedObject),
+    [activeComposePart, selectedObject, selectedObjectId],
+  );
+  const composeDrillBreadcrumbs = useMemo(() => {
+    const rootLabel = getDisplayNameFromPath(part.filePath || part.id);
+    const rootId = part.compositionId ?? part.id;
+    const items = [{ id: rootId, label: rootLabel || "Composition" }];
+    for (const entry of composeDrillStack) {
+      const drillPart = compositionLibrary.find(
+        (item) =>
+          item.id === entry.compositionId ||
+          item.compositionId === entry.compositionId,
+      );
+      if (!drillPart) continue;
+      items.push({
+        id: drillPart.compositionId ?? drillPart.id,
+        label:
+          getDisplayNameFromPath(drillPart.filePath || drillPart.id) ||
+          "Composition",
+      });
+    }
+    return items;
+  }, [composeDrillStack, compositionLibrary, part]);
+  useEffect(() => {
+    if (!composeMode && composeDrillStack.length > 0) setComposeDrillStack([]);
+  }, [composeDrillStack.length, composeMode]);
   const composePlaybackRangeRef = useRef<
     { start: number; end: number; localLabels: true } | undefined
   >(undefined);
   const nextComposePlaybackRange =
-    composeMode && activeTimelinePart
+    composeMode && activeComposeTimelinePart
       ? {
-          start: activeTimelinePart.start,
-          end: activeTimelinePart.start + part.duration,
+          start: activeComposeTimelinePart.start,
+          end: activeComposeTimelinePart.start + activeComposePart.duration,
           localLabels: true as const,
         }
       : undefined;
@@ -754,7 +869,6 @@ function AppContent({
     ? composePlaybackRangeRef.current
     : nextComposePlaybackRange;
 
-  const compositionLibrary = project.compositionLibrary ?? [];
   const {
     editorTabs,
     activeEditorTabId,
@@ -852,7 +966,8 @@ function AppContent({
     visibleSceneTransitionLayers,
     setPreviewTransitionLayers,
   });
-  const hasPreviewComposition = hasActiveComposition;
+  const hasPreviewComposition =
+    Boolean(composeDrillPart) || hasActiveComposition;
   const manualPrerenderRanges = useMemo(
     () =>
       getManualPrerenderRangesForMarkedCompositions(
@@ -1037,7 +1152,7 @@ function AppContent({
     timelineMode,
     timelineModeRef,
     hasActiveComposition,
-    partFilePath: part.filePath,
+    partFilePath: activeComposePart.filePath,
     activePartFilePathRef,
     leftPanelTab,
     rightPanelTab,
@@ -1082,11 +1197,15 @@ function AppContent({
     setSelectionPayload((current) => {
       if (!current?.objects.length) return current;
       const nextObjects = current.objects.flatMap((selected) => {
-        if (selected.id === part.background.id)
-          return [selectionObjectFromBackgroundLayer(part.background)];
+        if (selected.id === activeComposePart.background.id)
+          return [
+            selectionObjectFromBackgroundLayer(activeComposePart.background),
+          ];
         const object =
-          part.objects.find((item) => item.id === selected.id) ??
-          part.background.elements.find((item) => item.id === selected.id);
+          activeComposePart.objects.find((item) => item.id === selected.id) ??
+          activeComposePart.background.elements.find(
+            (item) => item.id === selected.id,
+          );
         return object ? [selectionObjectFromFrameObject(object)] : [];
       });
 
@@ -1123,7 +1242,11 @@ function AppContent({
     });
 
     if (selectedObjectMissing) setSelectedObjectId(null);
-  }, [part.background.elements, part.objects, timelineMode]);
+  }, [
+    activeComposePart.background.elements,
+    activeComposePart.objects,
+    timelineMode,
+  ]);
 
   const {
     persistComposeSelection,
@@ -1132,7 +1255,7 @@ function AppContent({
     selectComposeFrameSettings,
     cancelActiveSelector,
   } = useComposeSelectionCommands({
-    part,
+    part: activeComposePart,
     focusPickZoomMarker,
     positionPickTranslationMarker,
     trackerPickTranslationMarker,
@@ -1177,10 +1300,10 @@ function AppContent({
         return;
       }
       const foundObject =
-        part.objects.find((o) => o.id === objectId) ??
-        part.background.elements.find((o) => o.id === objectId) ??
-        (objectId === part.background.id
-          ? frameObjectFromBackgroundLayer(part.background)
+        activeComposePart.objects.find((o) => o.id === objectId) ??
+        activeComposePart.background.elements.find((o) => o.id === objectId) ??
+        (objectId === activeComposePart.background.id
+          ? frameObjectFromBackgroundLayer(activeComposePart.background)
           : undefined);
       if (foundObject) {
         setComposeSelectionObjects([foundObject]);
@@ -1188,11 +1311,11 @@ function AppContent({
         setSelectedObjectId(objectId);
       }
     },
-    [part, setComposeSelectionObjects, setSelectedObjectId],
+    [activeComposePart, setComposeSelectionObjects, setSelectedObjectId],
   );
 
   useComposeSelectionHydration({
-    part,
+    part: activeComposePart,
     timelineMode,
     project,
     selectedObjectId,
@@ -1372,9 +1495,9 @@ function AppContent({
     updateSelectedPartDuration,
     updateTextObjectContent,
   } = useFrameObjectCommands({
-    part,
+    part: activeComposePart,
     selectedObjectId,
-    selectedPart,
+    selectedPart: composeDrillPart ?? selectedPart,
     setEditingTextObjectId,
     setComposeSelectionObjects,
     applyComposeLayerSelection,
@@ -1384,8 +1507,8 @@ function AppContent({
   const { previewSelectedObject, previewPartFrame, previewPartBackground } =
     useComposeObjectPreview({
       frameViewportRef,
-      selectedObject,
-      part,
+      selectedObject: activeComposeSelectedObject,
+      part: activeComposePart,
     });
 
   const {
@@ -1395,7 +1518,7 @@ function AppContent({
     renameComposeAnimationLayer,
     openComposeObjectContextMenu,
   } = useComposeObjectMutations({
-    part,
+    part: activeComposePart,
     selectedComposeObjectIds,
     setAppContextMenu,
     setComposeSelectionObjects,
@@ -1484,19 +1607,19 @@ function AppContent({
     updateMotionMarkers,
     updateMotionMarkerFocusGroup,
   } = useMotionMarkerCommands({
-    activeTimelinePart,
+    activeTimelinePart: activeComposeTimelinePart ?? activeTimelinePart,
     cameraRef,
     hiddenMotionLayerIds,
     isPickingTranslationPosition,
     isPickingZoomFocus,
     markerDurationSeconds,
     motionLayers,
-    part,
+    part: activeComposePart,
     pendingPreviewRef: pendingCameraPreviewRef,
     previewTime,
     scene,
     sceneDurationSeconds,
-    selectedObjectBounds: selectedObject?.bounds ?? null,
+    selectedObjectBounds: activeComposeSelectedObject?.bounds ?? null,
     selectedMotionMarkers,
     timelineMode,
     timelinePrecision,
@@ -1551,12 +1674,12 @@ function AppContent({
     objectResizeMode,
     objectResizePreserveAspectRef,
     objectResizeRef,
-    part,
+    part: activeComposePart,
     pendingDragBoxRef,
     pendingFramePickPointRef,
     pointPickAdjustment,
     positionPickTranslationMarker,
-    previewTime,
+    previewTime: activeComposePreviewTime,
     selectionPayload,
     trackerPickTranslationMarker,
     zoomScale,
@@ -1593,7 +1716,7 @@ function AppContent({
   } = frameInteractionController;
 
   const composeDrawing = useComposeDrawing({
-    part,
+    part: activeComposePart,
     activeToolRef,
     cameraPreviewScale: cameraPreviewTransform.scale,
     shapeDrawStartRef,
@@ -1626,10 +1749,112 @@ function AppContent({
   });
 
   const addCameraToActivePart = useCallback(() => {
-    if (!part) return;
+    if (!activeComposePart) return;
     createCameraObject();
-    selectPart(part.id);
-  }, [part, createCameraObject, selectPart]);
+    selectPart(activeComposePart.id);
+  }, [activeComposePart, createCameraObject, selectPart]);
+
+  const addSubcompositionToActivePart = useCallback(() => {
+    const siblingNames = (projectRef.current.compositionLibrary ?? []).map(
+      (composition) =>
+        composition.filePath.split("/").pop() || composition.filePath,
+    );
+    const filePath = nextNumberedSemanticName(
+      "subcomposition",
+      ".composition.json",
+      siblingNames,
+    );
+    let createdObject: FrameObject | null = null;
+    let nextSources: Record<string, string> | null = null;
+    updateProject(
+      (current) => {
+        const result = createCompositionInLibrary(
+          current,
+          compositionSourcesRef.current,
+          activeComposePart,
+          filePath,
+        );
+        nextSources = result.compositionSources;
+        const created = (result.project.compositionLibrary ?? []).find(
+          (composition) => composition.filePath === filePath,
+        );
+        if (!created) return result.project;
+        const objectId = `subcomposition-${Date.now().toString(36)}`;
+        const object: FrameObject = {
+          id: objectId,
+          name: "Subcomposition",
+          type: "composition",
+          selector: `[data-object-id='${objectId}']`,
+          bounds: { x: 200, y: 120, width: 480, height: 320 },
+          style: { backgroundColor: "transparent", overflow: "hidden" },
+          props: { compositionId: created.id },
+        };
+        createdObject = object;
+        const withBinItem = addCompositionBinItemInProject(
+          result.project,
+          created,
+        );
+        return replacePartInProject(
+          withBinItem,
+          activeComposePart.compositionId ?? activeComposePart.id,
+          (composition) => ({
+            ...composition,
+            objects: [...composition.objects, object],
+          }),
+        );
+      },
+      { history: true, syncSources: false },
+    );
+    if (nextSources) {
+      compositionSourcesRef.current = nextSources;
+      setCompositionSources(nextSources);
+    }
+    if (createdObject) setComposeSelectionObjects([createdObject]);
+  }, [
+    activeComposePart,
+    compositionSourcesRef,
+    projectRef,
+    setComposeSelectionObjects,
+    setCompositionSources,
+    updateProject,
+  ]);
+
+  const openSubcomposition = useCallback(
+    (compositionId: string, sourceObjectId: string | null = null) => {
+      setComposeDrillStack((stack) => [
+        ...stack,
+        { compositionId, sourceObjectId },
+      ]);
+      updateTimelineMode("compose");
+      setSelectedObjectId(null);
+      setSelectionPayload(null);
+    },
+    [updateTimelineMode],
+  );
+
+  const goBackFromSubcomposition = useCallback(() => {
+    const sourceObjectId = composeDrillStack.at(-1)?.sourceObjectId ?? null;
+    setComposeDrillStack((stack) => stack.slice(0, -1));
+    setSelectionPayload(null);
+    setSelectedObjectId(sourceObjectId);
+  }, [composeDrillStack]);
+
+  const selectComposeDrillDepth = useCallback((depth: number) => {
+    setComposeDrillStack((stack) => {
+      const nextDepth = clamp(Math.trunc(depth), 0, stack.length);
+      if (nextDepth === stack.length) return stack;
+      return stack.slice(0, nextDepth);
+    });
+    setSelectedObjectId(null);
+    setSelectionPayload(null);
+  }, []);
+
+  const exitComposeMode = useCallback(() => {
+    setComposeDrillStack([]);
+    updateTimelineMode("direct");
+    setSelectedObjectId(null);
+    setSelectionPayload(null);
+  }, [updateTimelineMode]);
 
   const handleCameraPropsChange = useCallback(
     (cameraObjectId: string, next: CameraObjectProps) => {
@@ -1863,7 +2088,7 @@ function AppContent({
     composeMode,
     hasPreviewComposition,
     mode,
-    part,
+    part: activeComposePart,
     selectedComposeObjectIds,
     addNullObjectToFrameCenter: composeDrawing.addNullObjectToFrameCenter,
     reorderComposeObjects,
@@ -1883,7 +2108,7 @@ function AppContent({
     composeMode,
     editingTextObjectId,
     mode,
-    part,
+    part: activeComposePart,
     selectedComposeObjectIds,
     deleteComposeObjects,
     setComposeSelectionObjects,
@@ -2158,21 +2383,22 @@ function AppContent({
     cameraPreviewTransform,
     displayFramePreviewScale,
     previewFps,
-    part,
-    sceneMotionPart,
+    part: activeComposePart,
+    compositionLibrary,
+    sceneMotionPart: activeComposeSceneMotionPart,
     sceneWrap,
-    displayPartStart,
-    previewParts,
+    displayPartStart: activeComposeDisplayPartStart,
+    previewParts: activeComposePreviewParts,
     transitionPreviewParts,
     visibleSceneAdjustmentLayers,
     visibleSceneTransitionLayers,
     motionLayers,
     hiddenMotionLayerIds,
     activeCompositionHidden,
-    previewTime,
+    previewTime: activeComposePreviewTime,
     adjustedSceneTime,
     timelineMode,
-    previewSceneContext,
+    previewSceneContext: activeComposePreviewSceneContext,
     previewSelectionObjects,
     objectSnapGuides,
     marqueeDragging,
@@ -2185,6 +2411,7 @@ function AppContent({
     startObjectDrag,
     startObjectResize,
     startTextObjectEdit,
+    openSubcomposition,
     openComposeObjectContextMenu,
     updateTextObjectContent,
     commitTranslationTrackerPick,
@@ -2279,17 +2506,28 @@ function AppContent({
     moveTransitionLayers,
     shiftTimelineGapMarkers,
     updateTransitionLayer,
-    hasActiveComposition,
-    part,
+    hasActiveComposition: hasPreviewComposition,
+    part: activeComposePart,
     selectedComposeObjectIds,
     updateTimelineMode,
+    exitComposeMode,
+    composeDrillBreadcrumbs,
+    goBackFromSubcomposition,
+    selectComposeDrillDepth,
     inspectComposeObject,
     selectComposeLayerObjects,
     persistComposeSelection,
     renameComposeAnimationLayer,
     toggleComposeLayerHidden,
+    openSubcomposition,
     reorderComposeObjects,
     updateComposeObject,
+    setComposeDrawTool: setActiveTool,
+    addComposeNullObject: composeDrawing.addNullObjectToFrameCenter,
+    addComposeCamera: addCameraToActivePart,
+    addComposeMediaObject: () => createComposeObject("media"),
+    addComposeCodeObject: () => createComposeObject("code"),
+    addSubcomposition: addSubcompositionToActivePart,
     setAppContextMenu,
   });
 
@@ -2376,7 +2614,7 @@ function AppContent({
             hasActiveComposition={hasPreviewComposition}
             mode={mode}
             previewFps={previewFps}
-            previewKey={part.id}
+            previewKey={activeComposePart.id}
             previewRenderScale={previewRenderScale}
             stageRef={centerPreviewScrollRef}
             onModeChange={handleModeChange}
@@ -2389,6 +2627,7 @@ function AppContent({
                     onAddCamera: addCameraToActivePart,
                     onAddMediaObject: () => createComposeObject("media"),
                     onAddCodeObject: () => createComposeObject("code"),
+                    onAddSubcomposition: addSubcompositionToActivePart,
                     onActiveToolChange: setActiveTool,
                     activeCursorTool,
                     onCursorToolChange: setActiveCursorTool,
@@ -2422,7 +2661,7 @@ function AppContent({
           <RightInspectorPanel validationErrors={validationErrors}>
             <ConnectedInspectorContent
               rightPanelTab={rightPanelTab}
-              part={part}
+              part={activeComposePart}
               composeMode={composeMode}
               selectedMotion={selectedMotion}
               selectedMotionPart={selectedMotionPart}

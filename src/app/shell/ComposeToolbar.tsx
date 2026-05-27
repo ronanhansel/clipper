@@ -9,6 +9,7 @@ import {
   MousePointer2 as PointerIcon,
   PenTool,
   Pencil,
+  Layers2,
   Type,
   Waypoints,
 } from "lucide-react";
@@ -45,6 +46,7 @@ export type ComposeToolbarProps = {
   onAddCamera: () => void;
   onAddMediaObject: () => void;
   onAddCodeObject: () => void;
+  onAddSubcomposition: () => void;
   onActiveToolChange: (tool: ComposeDrawTool | null) => void;
   activeCursorTool: ComposeCursorTool;
   onCursorToolChange: (tool: ComposeCursorTool) => void;
@@ -126,7 +128,7 @@ const textTools: ToolbarTool[] = [
   { tool: "textPath", label: "Text on path", icon: <Waypoints size={18} /> },
 ];
 
-type ObjectAddToolKey = "null" | "camera";
+type ObjectAddToolKey = "null" | "camera" | "subcomposition";
 
 type ObjectAddTool = {
   key: ObjectAddToolKey;
@@ -146,6 +148,11 @@ const objectAddTools: ObjectAddTool[] = [
     key: "camera",
     label: "Camera",
     icon: <CameraIcon size={17} />,
+  },
+  {
+    key: "subcomposition",
+    label: "Subcomposition",
+    icon: <Layers2 size={17} />,
   },
 ];
 
@@ -199,6 +206,7 @@ export function ComposeToolbar({
   onAddCamera,
   onAddMediaObject,
   onAddCodeObject,
+  onAddSubcomposition,
   onActiveToolChange,
   activeCursorTool,
   onCursorToolChange,
@@ -262,6 +270,7 @@ export function ComposeToolbar({
     setLastObjectAddTool(tool.key);
     if (tool.key === "null") onAddNullObject();
     else if (tool.key === "camera") onAddCamera();
+    else if (tool.key === "subcomposition") onAddSubcomposition();
     setOpenMenu(null);
   }
 

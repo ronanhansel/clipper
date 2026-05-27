@@ -35,7 +35,7 @@ import {
  *
  * Native: rect, null, image, text, svg.
  * Per-element DOM capture: html, template, code, pattern2d,
- * custom-renderer (and any unknown future type via the default slot).
+ * composition, custom-renderer (and any unknown future type via the default slot).
  * Each per-element capture node owns its own private canvas + texture
  * so overlapping 3D layers no longer share a 2D-flattened composite.
  */
@@ -63,6 +63,7 @@ const CAPTURE_FALLBACK_KINDS: FrameObjectType[] = [
   "template",
   "custom-renderer",
   "pattern2d",
+  "composition",
   "code",
 ];
 

@@ -58,6 +58,7 @@ export type UseFramePreviewPropsParams = {
   displayFramePreviewScale: number;
   previewFps: PreviewFps;
   part: Part;
+  compositionLibrary: Part[];
   sceneMotionPart: Part;
   sceneWrap: SceneWrapConfig;
   displayPartStart: number;
@@ -84,6 +85,9 @@ export type UseFramePreviewPropsParams = {
   startObjectDrag: StrategyFramePreviewProps["onObjectPointerDown"];
   startObjectResize: StrategyFramePreviewProps["onObjectResizePointerDown"];
   startTextObjectEdit: StrategyFramePreviewProps["onTextObjectDoubleClick"];
+  openSubcomposition: NonNullable<
+    StrategyFramePreviewProps["onSubcompositionDoubleClick"]
+  >;
   openComposeObjectContextMenu: NonNullable<
     StrategyFramePreviewProps["onObjectContextMenu"]
   >;
@@ -135,6 +139,7 @@ export function useFramePreviewProps({
   displayFramePreviewScale,
   previewFps,
   part,
+  compositionLibrary,
   sceneMotionPart,
   sceneWrap,
   displayPartStart,
@@ -161,6 +166,7 @@ export function useFramePreviewProps({
   startObjectDrag,
   startObjectResize,
   startTextObjectEdit,
+  openSubcomposition,
   openComposeObjectContextMenu,
   updateTextObjectContent,
   commitTranslationTrackerPick,
@@ -195,6 +201,7 @@ export function useFramePreviewProps({
       previewFps,
       isPlaying,
       part,
+      compositionLibrary,
       sceneMotionPart,
       sceneWrap,
       partStart: displayPartStart,
@@ -243,6 +250,7 @@ export function useFramePreviewProps({
       onTextEditEnd: composeDrawing.handleTextEditEnd,
       onTextPathOffsetChange: composeDrawing.updateTextPathOffset,
       onTextObjectDoubleClick: startTextObjectEdit,
+      onSubcompositionDoubleClick: openSubcomposition,
       onTrackerTargetPick: commitTranslationTrackerPick,
       selectedObjectId: composeMode ? selectedObjectId : null,
       onCameraPropsChange,
@@ -270,6 +278,7 @@ export function useFramePreviewProps({
     displayFramePreviewScale,
     previewFps,
     part,
+    compositionLibrary,
     sceneMotionPart,
     sceneWrap,
     composeMode,
@@ -307,6 +316,7 @@ export function useFramePreviewProps({
     composeDrawing.handleTextEditEnd,
     composeDrawing.updateTextPathOffset,
     startTextObjectEdit,
+    openSubcomposition,
     commitTranslationTrackerPick,
     selectedObjectId,
     onCameraPropsChange,

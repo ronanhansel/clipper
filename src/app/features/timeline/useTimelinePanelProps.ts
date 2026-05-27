@@ -92,13 +92,24 @@ export type UseTimelinePanelPropsParams = {
   part: TimelinePanelProps["composeAnimationPart"];
   selectedComposeObjectIds: TimelinePanelProps["selectedObjectIds"];
   updateTimelineMode: (mode: TimelinePanelProps["mode"]) => void;
+  exitComposeMode: NonNullable<TimelinePanelProps["onExitCompose"]>;
+  composeDrillBreadcrumbs: TimelinePanelProps["composeDrillBreadcrumbs"];
+  goBackFromSubcomposition: TimelinePanelProps["onBackFromSubcomposition"];
+  selectComposeDrillDepth: TimelinePanelProps["onSelectComposeDrillDepth"];
   inspectComposeObject: TimelinePanelProps["onInspectComposeObject"];
   selectComposeLayerObjects: TimelinePanelProps["onSelectComposeObjects"];
   persistComposeSelection: TimelinePanelProps["onPersistComposeSelection"];
   renameComposeAnimationLayer: TimelinePanelProps["onRenameComposeAnimationLayer"];
   toggleComposeLayerHidden: TimelinePanelProps["onToggleComposeLayerHidden"];
+  openSubcomposition: TimelinePanelProps["onOpenSubcomposition"];
   reorderComposeObjects: TimelinePanelProps["onReorderComposeObjects"];
   updateComposeObject: TimelinePanelProps["onUpdateComposeObject"];
+  setComposeDrawTool: TimelinePanelProps["onSetComposeDrawTool"];
+  addComposeNullObject: TimelinePanelProps["onAddComposeNullObject"];
+  addComposeCamera: TimelinePanelProps["onAddComposeCamera"];
+  addComposeMediaObject: TimelinePanelProps["onAddComposeMediaObject"];
+  addComposeCodeObject: TimelinePanelProps["onAddComposeCodeObject"];
+  addSubcomposition: TimelinePanelProps["onAddSubcomposition"];
   setAppContextMenu: TimelinePanelProps["setAppContextMenu"];
 };
 
@@ -190,13 +201,24 @@ export function useTimelinePanelProps(
     part,
     selectedComposeObjectIds,
     updateTimelineMode,
+    exitComposeMode,
+    composeDrillBreadcrumbs,
+    goBackFromSubcomposition,
+    selectComposeDrillDepth,
     inspectComposeObject,
     selectComposeLayerObjects,
     persistComposeSelection,
     renameComposeAnimationLayer,
     toggleComposeLayerHidden,
+    openSubcomposition,
     reorderComposeObjects,
     updateComposeObject,
+    setComposeDrawTool,
+    addComposeNullObject,
+    addComposeCamera,
+    addComposeMediaObject,
+    addComposeCodeObject,
+    addSubcomposition,
     setAppContextMenu,
   } = params;
 
@@ -292,14 +314,24 @@ export function useTimelinePanelProps(
       onUpdateTransitionLayer: updateTransitionLayer,
       composeAnimationPart: hasActiveComposition ? part : null,
       selectedObjectIds: selectedComposeObjectIds,
-      onExitCompose: () => updateTimelineMode("direct"),
+      onExitCompose: exitComposeMode,
+      composeDrillBreadcrumbs,
+      onBackFromSubcomposition: goBackFromSubcomposition,
+      onSelectComposeDrillDepth: selectComposeDrillDepth,
       onInspectComposeObject: inspectComposeObject,
       onSelectComposeObjects: selectComposeLayerObjects,
       onPersistComposeSelection: persistComposeSelection,
       onRenameComposeAnimationLayer: renameComposeAnimationLayer,
       onToggleComposeLayerHidden: toggleComposeLayerHidden,
+      onOpenSubcomposition: openSubcomposition,
       onReorderComposeObjects: reorderComposeObjects,
       onUpdateComposeObject: updateComposeObject,
+      onSetComposeDrawTool: setComposeDrawTool,
+      onAddComposeNullObject: addComposeNullObject,
+      onAddComposeCamera: addComposeCamera,
+      onAddComposeMediaObject: addComposeMediaObject,
+      onAddComposeCodeObject: addComposeCodeObject,
+      onAddSubcomposition: addSubcomposition,
       setAppContextMenu,
     }),
     [
@@ -386,13 +418,24 @@ export function useTimelinePanelProps(
       part,
       selectedComposeObjectIds,
       updateTimelineMode,
+      exitComposeMode,
+      composeDrillBreadcrumbs,
+      goBackFromSubcomposition,
+      selectComposeDrillDepth,
       inspectComposeObject,
       selectComposeLayerObjects,
       persistComposeSelection,
       renameComposeAnimationLayer,
       toggleComposeLayerHidden,
+      openSubcomposition,
       reorderComposeObjects,
       updateComposeObject,
+      setComposeDrawTool,
+      addComposeNullObject,
+      addComposeCamera,
+      addComposeMediaObject,
+      addComposeCodeObject,
+      addSubcomposition,
       setAppContextMenu,
     ],
   );

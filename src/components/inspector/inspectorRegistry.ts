@@ -59,6 +59,9 @@ export const inspectorRegistry: Record<string, InspectorTypeDefinition> = {
   code: {
     sections: [BoundsSection, CodeSection],
   },
+  composition: {
+    sections: [BoundsSection, EffectsSection, StrokeSection],
+  },
   image: {
     sections: [BoundsSection, EffectsSection, StrokeSection, ImageSection],
   },

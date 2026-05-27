@@ -8,6 +8,7 @@ import type {
   TimelineNodeContextTarget,
 } from "../../app/types";
 import type { PrerenderCacheCoverage } from "../../app/features/preview/usePrerenderCache";
+import type { ComposeDrawTool } from "../../app/features/compose/composeDrawing";
 import type {
   TimelineMarkerMove,
   TimelineMarkerResize,
@@ -202,11 +203,18 @@ export type TimelinePanelProps = {
   composeAnimationPart?: Part | null;
   selectedObjectIds?: string[];
   onExitCompose?: () => void;
+  composeDrillBreadcrumbs?: Array<{ id: string; label: string }>;
+  onBackFromSubcomposition?: () => void;
+  onSelectComposeDrillDepth?: (depth: number) => void;
   onInspectComposeObject?: (object: FrameObject | null) => void;
   onSelectComposeObjects?: (objects: FrameObject[]) => void;
   onPersistComposeSelection?: (objectIds: string[]) => void;
   onRenameComposeAnimationLayer?: (layerId: string, name: string) => void;
   onToggleComposeLayerHidden?: (layerId: string) => void;
+  onOpenSubcomposition?: (
+    compositionId: string,
+    sourceObjectId?: string | null,
+  ) => void;
   onReorderComposeObjects?: (objectIds: string[], targetIndex: number) => void;
   onUpdateComposeObject?: (
     objectId: string,
@@ -214,6 +222,12 @@ export type TimelinePanelProps = {
       object: import("../../core/types").FrameObject,
     ) => import("../../core/types").FrameObject,
   ) => void;
+  onSetComposeDrawTool?: (tool: ComposeDrawTool) => void;
+  onAddComposeNullObject?: () => void;
+  onAddComposeCamera?: () => void;
+  onAddComposeMediaObject?: () => void;
+  onAddComposeCodeObject?: () => void;
+  onAddSubcomposition?: () => void;
   setAppContextMenu?: (menu: ContextMenuState) => void;
 };
 

@@ -91,6 +91,7 @@ export interface DirectCompositionGpuHostProps {
   >;
   adjustmentLayers?: AdjustmentLayer[];
   transitionLayers?: TransitionLayer[];
+  compositionLibrary?: CompositionClip[];
   transitionComposite?: DirectGpuTransitionComposite | null;
   hostClassName?: string;
 }
@@ -689,6 +690,7 @@ export const DirectCompositionGpuHost = memo(function DirectCompositionGpuHost(
                       isActive ? backendProps.renderClockSceneTime : undefined
                     }
                     renderMode={backendProps.renderMode}
+                    compositionLibrary={props.compositionLibrary}
                     sourceContainerRefs={sourceContainerRefs}
                   />
                 );
@@ -714,6 +716,7 @@ export const DirectCompositionGpuHost = memo(function DirectCompositionGpuHost(
                   backendProps.renderClockSceneTime
                 }
                 renderMode={backendProps.renderMode}
+                compositionLibrary={props.compositionLibrary}
                 sourceContainerRefs={transitionSourceContainerRefs}
                 sourceKind="transition-to"
               />
@@ -893,6 +896,7 @@ const DirectCompositionGpuSourceSlot = memo(
     isPlaying,
     renderClockSceneTime,
     renderMode,
+    compositionLibrary,
     sourceContainerRefs,
     sourceKind,
   }: {
@@ -906,6 +910,7 @@ const DirectCompositionGpuSourceSlot = memo(
     isPlaying: boolean;
     renderClockSceneTime?: number;
     renderMode: CompositionBackendProps["renderMode"];
+    compositionLibrary?: CompositionClip[];
     sourceContainerRefs: MutableRefObject<Map<string, HTMLDivElement | null>>;
     sourceKind?: string;
   }) {
@@ -952,6 +957,7 @@ const DirectCompositionGpuSourceSlot = memo(
           onTextEditCommit={NOOP_TEXT_COMMIT}
           onTextEditEnd={undefined}
           onTextObjectDoubleClick={NOOP_OBJECT_DOUBLE_CLICK}
+          compositionLibrary={compositionLibrary}
         />
       </div>
     );

@@ -437,8 +437,7 @@ export function LayerLabel({
                 ? "cursor-default text-[#aeb3c1] hover:bg-[#20232c]/70 hover:text-[#dfe2ea] hover:before:opacity-100 focus-visible:bg-[#20232c]/70 focus-visible:outline-none focus-visible:before:opacity-100"
                 : "cursor-default text-[#aeb3c1] focus-visible:outline-none"
           }`}
-          title={locked ? "Unlock layer to rename" : "Double-click to rename"}
-          onDoubleClick={locked ? undefined : onEdit}
+          title={name}
         >
           {name}
         </button>
@@ -510,6 +509,13 @@ export function LayerLabel({
                   {hidden ? "Show layer" : "Hide layer"}
                 </button>
               ) : null}
+              <button
+                className="px-3 py-2 text-left hover:bg-[#20232c] disabled:cursor-not-allowed disabled:text-[#5f6470] disabled:hover:bg-transparent"
+                disabled={locked}
+                onClick={onEdit}
+              >
+                Rename
+              </button>
               <button
                 className="px-3 py-2 text-left hover:bg-[#20232c]"
                 onClick={onToggleLocked}

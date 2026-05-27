@@ -54,6 +54,9 @@ export const DomBackend: CompositionBackend = function DomBackend({
   onTextEditCommit,
   onTextEditEnd,
   onTextObjectDoubleClick,
+  compositionLibrary,
+  compositionAncestors,
+  onSubcompositionDoubleClick,
 }) {
   const renderClockState = useMemo(
     () => ({
@@ -262,6 +265,9 @@ export const DomBackend: CompositionBackend = function DomBackend({
                 onTextEditCommit(object.id, content, richText, bounds)
               }
               onTextEditEnd={onTextEditEnd}
+              compositionLibrary={compositionLibrary}
+              compositionAncestors={compositionAncestors}
+              onSubcompositionDoubleClick={onSubcompositionDoubleClick}
             />
           ));
       })()}

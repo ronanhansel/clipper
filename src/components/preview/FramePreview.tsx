@@ -174,6 +174,7 @@ type FramePreviewProps = {
   previewFps?: PreviewFps;
   isPlaying: boolean;
   part: Part;
+  compositionLibrary?: Part[];
   /**
    * Composition that carries scene-level motion markers rebased into the
    * active part's local time. Used only by the camera transform — never
@@ -239,6 +240,10 @@ type FramePreviewProps = {
   onTextObjectDoubleClick: (
     event: ReactMouseEvent<HTMLDivElement>,
     object: FrameObject,
+  ) => void;
+  onSubcompositionDoubleClick?: (
+    compositionId: string,
+    sourceObjectId?: string | null,
   ) => void;
   onTrackerTargetPick: (objectId: string) => void;
   exportTileViewport?: ExportTileViewport;
@@ -327,6 +332,7 @@ export const FramePreview = memo(function FramePreview({
   previewFps = defaultPreviewFps,
   isPlaying,
   part,
+  compositionLibrary = [],
   sceneMotionPart,
   sceneWrap,
   partStart,
@@ -357,6 +363,7 @@ export const FramePreview = memo(function FramePreview({
   onTextEditEnd,
   onTextPathOffsetChange,
   onTextObjectDoubleClick,
+  onSubcompositionDoubleClick,
   onTrackerTargetPick,
   activeShapeTool,
   handToolActive = false,
@@ -998,6 +1005,11 @@ export const FramePreview = memo(function FramePreview({
                     onTextEditCommit={onTextEditCommit}
                     onTextEditEnd={onTextEditEnd}
                     onTextObjectDoubleClick={onTextObjectDoubleClick}
+                    compositionLibrary={compositionLibrary}
+                    compositionAncestors={[
+                      displayPart.compositionId ?? displayPart.id,
+                    ]}
+                    onSubcompositionDoubleClick={onSubcompositionDoubleClick}
                     selectedObjectId={selectedObjectId}
                     onCameraPropsChange={onCameraPropsChange}
                     onCameraPathEaseChange={onCameraPathEaseChange}
@@ -2789,6 +2801,9 @@ export const FrameObjectView = memo(function FrameObjectView({
   onPointerDown,
   onTextEditCommit,
   onTextEditEnd,
+  compositionLibrary = [],
+  compositionAncestors = [],
+  onSubcompositionDoubleClick,
 }: {
   activeShapeTool?: ComposeDrawTool | null;
   animationsEnabled: boolean;
@@ -2813,6 +2828,12 @@ export const FrameObjectView = memo(function FrameObjectView({
     bounds?: Bounds,
   ) => void;
   onTextEditEnd?: () => void;
+  compositionLibrary?: Part[];
+  compositionAncestors?: readonly string[];
+  onSubcompositionDoubleClick?: (
+    compositionId: string,
+    sourceObjectId?: string | null,
+  ) => void;
 }) {
   const evaluatedObject = useMemo(
     () =>
@@ -3235,6 +3256,19 @@ export const FrameObjectView = memo(function FrameObjectView({
       {object.type === "code" ? (
         <CodeObjectFrame object={evaluatedObject} />
       ) : null}
+      {object.type === "composition" ? (
+        <SubcompositionContent
+          bounds={evaluatedBounds}
+          compositionAncestors={compositionAncestors}
+          compositionLibrary={compositionLibrary}
+          frameScale={frameScale}
+          isPlaying={isPlaying}
+          object={evaluatedObject}
+          previewTime={previewTime}
+          renderMode={renderMode}
+          onSubcompositionDoubleClick={onSubcompositionDoubleClick}
+        />
+      ) : null}
       {(object.type === "html" ||
         object.type === "template" ||
         object.type === "custom-renderer") &&
@@ -3257,6 +3291,7 @@ export const FrameObjectView = memo(function FrameObjectView({
       object.type !== "template" &&
       object.type !== "custom-renderer" &&
       object.type !== "pattern2d" &&
+      object.type !== "composition" &&
       object.type !== "code" &&
       content
         ? content
@@ -3327,6 +3362,106 @@ function renderSplitTextSegments(
     );
   });
 }
+
+function SubcompositionContent({
+  bounds,
+  compositionAncestors,
+  compositionLibrary,
+  frameScale,
+  isPlaying,
+  object,
+  previewTime,
+  renderMode,
+  onSubcompositionDoubleClick,
+}: {
+  bounds: Bounds;
+  compositionAncestors: readonly string[];
+  compositionLibrary: Part[];
+  frameScale: number;
+  isPlaying: boolean;
+  object: FrameObject;
+  previewTime: number;
+  renderMode: "preview" | "export";
+  onSubcompositionDoubleClick?: (
+    compositionId: string,
+    sourceObjectId?: string | null,
+  ) => void;
+}) {
+  const hostRef = useRef<HTMLDivElement | null>(null);
+  const compositionId = readSubcompositionId(object);
+  const part = compositionLibrary.find(
+    (item) => item.id === compositionId || item.compositionId === compositionId,
+  );
+  if (!compositionId || !part) {
+    return <SubcompositionPlaceholder label="Missing composition" />;
+  }
+  const canonicalId = part.compositionId ?? part.id;
+  if (compositionAncestors.includes(canonicalId)) {
+    return <SubcompositionPlaceholder label="Composition cycle" />;
+  }
+  const localTime = clamp(previewTime, 0, part.duration);
+  return (
+    <div
+      className="absolute inset-0 overflow-hidden bg-black"
+      onDoubleClick={(event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        onSubcompositionDoubleClick?.(canonicalId, object.id);
+      }}
+    >
+      <div
+        className="absolute left-0 top-0 origin-top-left"
+        style={{
+          width: FRAME_WIDTH,
+          height: FRAME_HEIGHT,
+          transform: `scale(${bounds.width / FRAME_WIDTH}, ${bounds.height / FRAME_HEIGHT})`,
+        }}
+      >
+        <DomBackend
+          active={false}
+          activeShapeTool={null}
+          animationsEnabled={true}
+          canSelect={false}
+          compositionAncestors={[...compositionAncestors, canonicalId]}
+          compositionLibrary={compositionLibrary}
+          duration={part.duration}
+          editingTextObjectId={null}
+          exportTileFrameBounds={undefined}
+          focusPicking={false}
+          frameScale={frameScale}
+          hideNullObjects={true}
+          hostRef={hostRef}
+          isPlaying={isPlaying}
+          localTime={localTime}
+          part={part}
+          renderClockSceneTime={localTime}
+          renderMode={renderMode}
+          onObjectPointerDown={noopObjectPointerDownForSubcomposition}
+          onTextEditCommit={noopTextCommitForSubcomposition}
+          onTextObjectDoubleClick={noopObjectDoubleClickForSubcomposition}
+          onSubcompositionDoubleClick={onSubcompositionDoubleClick}
+        />
+      </div>
+    </div>
+  );
+}
+
+function readSubcompositionId(object: FrameObject) {
+  const value = object.props?.compositionId;
+  return typeof value === "string" ? value : "";
+}
+
+function SubcompositionPlaceholder({ label }: { label: string }) {
+  return (
+    <div className="absolute inset-0 grid place-items-center bg-[#11141a] text-[22px] font-bold text-[#8f98a8]">
+      {label}
+    </div>
+  );
+}
+
+const noopObjectPointerDownForSubcomposition = () => {};
+const noopTextCommitForSubcomposition = () => {};
+const noopObjectDoubleClickForSubcomposition = () => {};
 
 function tokenizeTextSegments(
   segments: RichTextSegment[],

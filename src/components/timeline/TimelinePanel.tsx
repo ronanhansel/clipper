@@ -144,6 +144,9 @@ export function TimelinePanel(props: TimelinePanelProps) {
           onExitCompose={
             props.onExitCompose ?? (() => props.onModeChange("direct"))
           }
+          breadcrumbs={props.composeDrillBreadcrumbs ?? []}
+          onBackFromSubcomposition={props.onBackFromSubcomposition}
+          onSelectComposeDrillDepth={props.onSelectComposeDrillDepth}
           onRenameLayer={props.onRenameComposeAnimationLayer}
           setAppContextMenu={props.setAppContextMenu}
           onScrub={props.onScrub}
@@ -152,6 +155,13 @@ export function TimelinePanel(props: TimelinePanelProps) {
           onInspectObject={props.onInspectComposeObject}
           onSelectObjects={props.onSelectComposeObjects}
           onToggleLayerHidden={props.onToggleComposeLayerHidden}
+          onOpenSubcomposition={props.onOpenSubcomposition}
+          onSetComposeDrawTool={props.onSetComposeDrawTool}
+          onAddComposeNullObject={props.onAddComposeNullObject}
+          onAddComposeCamera={props.onAddComposeCamera}
+          onAddComposeMediaObject={props.onAddComposeMediaObject}
+          onAddComposeCodeObject={props.onAddComposeCodeObject}
+          onAddSubcomposition={props.onAddSubcomposition}
           onReorderComposeObjects={props.onReorderComposeObjects}
           onTimelineLayersChange={props.onTimelineLayersChange}
           onTimelineViewportStateChange={props.onTimelineViewportStateChange}

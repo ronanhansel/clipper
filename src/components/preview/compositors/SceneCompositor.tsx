@@ -97,6 +97,12 @@ type SceneCompositorProps = {
     event: ReactMouseEvent<HTMLDivElement>,
     object: FrameObject,
   ) => void;
+  compositionLibrary?: CompositionClip[];
+  compositionAncestors?: readonly string[];
+  onSubcompositionDoubleClick?: (
+    compositionId: string,
+    sourceObjectId?: string | null,
+  ) => void;
   selectedObjectId?: string | null;
   onCameraPropsChange?: (
     cameraObjectId: string,
@@ -179,6 +185,9 @@ export const SceneCompositor = memo(function SceneCompositor({
   onTextEditCommit,
   onTextEditEnd,
   onTextObjectDoubleClick,
+  compositionLibrary,
+  compositionAncestors,
+  onSubcompositionDoubleClick,
   selectedObjectId,
   onCameraPropsChange,
   onCameraPathEaseChange,
@@ -425,6 +434,7 @@ export const SceneCompositor = memo(function SceneCompositor({
                         renderMode,
                         exportTileFrameBounds,
                       }}
+                      compositionLibrary={compositionLibrary}
                       adjustmentLayers={adjustmentLayers}
                       transitionLayers={transitionLayers}
                       hostClassName="pointer-events-none absolute inset-0"
@@ -476,6 +486,9 @@ export const SceneCompositor = memo(function SceneCompositor({
                 onTextEditCommit={onTextEditCommit}
                 onTextEditEnd={onTextEditEnd}
                 onTextObjectDoubleClick={onTextObjectDoubleClick}
+                compositionLibrary={compositionLibrary}
+                compositionAncestors={compositionAncestors}
+                onSubcompositionDoubleClick={onSubcompositionDoubleClick}
                 selectedObjectId={selectedObjectId}
                 onCameraPropsChange={onCameraPropsChange}
                 onCameraPathEaseChange={onCameraPathEaseChange}

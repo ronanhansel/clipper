@@ -12,9 +12,17 @@ import {
   type RefObject,
 } from "react";
 import { createPortal } from "react-dom";
-import { ChevronDown, ChevronRight, Eye, EyeOff, Goal } from "lucide-react";
+import {
+  ChevronDown,
+  ChevronLeft,
+  ChevronRight,
+  Eye,
+  EyeOff,
+  Goal,
+} from "lucide-react";
 import type { ContextMenuState } from "../../app/types";
 import { defaultTimelinePixelsPerSecond } from "../../app/config";
+import type { ComposeDrawTool } from "../../app/features/compose/composeDrawing";
 import { roundTwo } from "../../core/math";
 import { getTimelineTicks } from "../../core/timeline";
 import { getDisplayNameFromPath } from "../../core/fileNames";
@@ -85,8 +93,21 @@ type ComposeAnimationTimelinePanelProps = {
   timelineLayers: TimelineLayerState;
   timelineViewportState: TimelineViewportState;
   onExitCompose: () => void;
+  breadcrumbs?: Array<{ id: string; label: string }>;
+  onBackFromSubcomposition?: () => void;
+  onSelectComposeDrillDepth?: (depth: number) => void;
   onRenameLayer?: (layerId: string, name: string) => void;
   onToggleLayerHidden?: (layerId: string) => void;
+  onOpenSubcomposition?: (
+    compositionId: string,
+    sourceObjectId?: string | null,
+  ) => void;
+  onSetComposeDrawTool?: (tool: ComposeDrawTool) => void;
+  onAddComposeNullObject?: () => void;
+  onAddComposeCamera?: () => void;
+  onAddComposeMediaObject?: () => void;
+  onAddComposeCodeObject?: () => void;
+  onAddSubcomposition?: () => void;
   onScrub: (time: number) => void;
   onScrubStart: () => void;
   onScrubEnd: () => void;
@@ -120,6 +141,14 @@ type ComposeKeyframeHitTarget = {
   selectionIds: string[];
   selections: ComposeAnimationKeyframeSelection[];
 };
+
+function getLayerSubcompositionId(layer: ComposeAnimationTimelineLayer) {
+  if (layer.object?.type !== "composition") return null;
+  const compositionId = layer.object.props?.compositionId;
+  return typeof compositionId === "string" && compositionId
+    ? compositionId
+    : null;
+}
 
 type ComposeKeyframeMarqueeDrag = {
   startContentX: number;
@@ -186,8 +215,18 @@ function ComposeAnimationTimelinePanelContent({
   timelineLayers,
   timelineViewportState,
   onExitCompose,
+  breadcrumbs = [],
+  onBackFromSubcomposition,
+  onSelectComposeDrillDepth,
   onRenameLayer,
   onToggleLayerHidden,
+  onOpenSubcomposition,
+  onSetComposeDrawTool,
+  onAddComposeNullObject,
+  onAddComposeCamera,
+  onAddComposeMediaObject,
+  onAddComposeCodeObject,
+  onAddSubcomposition,
   onScrub,
   onScrubEnd,
   onScrubStart,
@@ -767,10 +806,26 @@ function ComposeAnimationTimelinePanelContent({
     event.stopPropagation();
     selectLayer(layer);
     const objects = part?.objects ?? [];
+    const subcompositionId = getLayerSubcompositionId(layer);
+    const selectDrawTool = (tool: ComposeDrawTool) => () =>
+      onSetComposeDrawTool?.(tool);
     setAppContextMenu?.({
       x: event.clientX,
       y: event.clientY,
       items: [
+        ...(subcompositionId
+          ? [
+              {
+                label: "Open composition",
+                action: () =>
+                  onOpenSubcomposition?.(
+                    subcompositionId,
+                    layer.object?.id ?? null,
+                  ),
+                disabled: !onOpenSubcomposition,
+              },
+            ]
+          : []),
         {
           label: "Rename",
           action: () => startLayerNameEdit(layer.id, layer.name),
@@ -792,7 +847,117 @@ function ComposeAnimationTimelinePanelContent({
             objects[0]?.id === layer.object.id,
         },
         {
-          label: "Apply animation preset",
+          label: "Add",
+          children: [
+            {
+              label: "Shape",
+              children: [
+                {
+                  label: "Rectangle",
+                  action: selectDrawTool("rect"),
+                  disabled: !onSetComposeDrawTool,
+                },
+                {
+                  label: "Ellipse",
+                  action: selectDrawTool("ellipse"),
+                  disabled: !onSetComposeDrawTool,
+                },
+                {
+                  label: "Line",
+                  action: selectDrawTool("line"),
+                  disabled: !onSetComposeDrawTool,
+                },
+                {
+                  label: "Arrow",
+                  action: selectDrawTool("arrow"),
+                  disabled: !onSetComposeDrawTool,
+                },
+                {
+                  label: "Polygon",
+                  action: selectDrawTool("polygon"),
+                  disabled: !onSetComposeDrawTool,
+                },
+                {
+                  label: "Star",
+                  action: selectDrawTool("star"),
+                  disabled: !onSetComposeDrawTool,
+                },
+              ],
+            },
+            {
+              label: "Pen",
+              children: [
+                {
+                  label: "Pen",
+                  action: selectDrawTool("pen"),
+                  disabled: !onSetComposeDrawTool,
+                },
+                {
+                  label: "Pencil",
+                  action: selectDrawTool("pencil"),
+                  disabled: !onSetComposeDrawTool,
+                },
+              ],
+            },
+            {
+              label: "Text",
+              children: [
+                {
+                  label: "Text",
+                  action: selectDrawTool("text"),
+                  disabled: !onSetComposeDrawTool,
+                },
+                {
+                  label: "Text on path",
+                  action: selectDrawTool("textPath"),
+                  disabled: !onSetComposeDrawTool,
+                },
+              ],
+            },
+            {
+              label: "Generator",
+              children: [
+                {
+                  label: "2D pattern",
+                  action: selectDrawTool("pattern2d"),
+                  disabled: !onSetComposeDrawTool,
+                },
+                {
+                  label: "Code object",
+                  action: () => onAddComposeCodeObject?.(),
+                  disabled: !onAddComposeCodeObject,
+                },
+                {
+                  label: "Media object",
+                  action: () => onAddComposeMediaObject?.(),
+                  disabled: !onAddComposeMediaObject,
+                },
+              ],
+            },
+            {
+              label: "Object",
+              children: [
+                {
+                  label: "Null object",
+                  action: () => onAddComposeNullObject?.(),
+                  disabled: !onAddComposeNullObject,
+                },
+                {
+                  label: "Camera",
+                  action: () => onAddComposeCamera?.(),
+                  disabled: !onAddComposeCamera,
+                },
+                {
+                  label: "Subcomposition",
+                  action: () => onAddSubcomposition?.(),
+                  disabled: !onAddSubcomposition,
+                },
+              ],
+            },
+          ],
+        },
+        {
+          label: "Animation preset",
           children: composeAnimationPresets.map((preset) => ({
             label: preset.label,
             action: () => applyPresetToLayer(layer, preset.id),
@@ -846,7 +1011,13 @@ function ComposeAnimationTimelinePanelContent({
         laneContentHeight={laneContentHeight}
         laneRowsStyle={laneRowsStyle}
         layerRailWidth={layerRailWidth}
-        layerHeaderContent={<ComposeTimelineLayerHeader />}
+        layerHeaderContent={
+          <ComposeTimelineLayerHeader
+            breadcrumbs={breadcrumbs}
+            onBackFromSubcomposition={onBackFromSubcomposition}
+            onSelectComposeDrillDepth={onSelectComposeDrillDepth}
+          />
+        }
         playheadColor="var(--clipper-accent)"
         refs={{
           playbackPlayheadRef,
@@ -886,7 +1057,13 @@ function ComposeAnimationTimelinePanelContent({
       laneContentHeight={laneContentHeight}
       laneRowsStyle={laneRowsStyle}
       layerRailWidth={layerRailWidth}
-      layerHeaderContent={<ComposeTimelineLayerHeader />}
+      layerHeaderContent={
+        <ComposeTimelineLayerHeader
+          breadcrumbs={breadcrumbs}
+          onBackFromSubcomposition={onBackFromSubcomposition}
+          onSelectComposeDrillDepth={onSelectComposeDrillDepth}
+        />
+      }
       playheadColor="var(--clipper-accent)"
       refs={{
         playbackPlayheadRef,
@@ -942,6 +1119,7 @@ function ComposeAnimationTimelinePanelContent({
               onDraftChange={setLayerNameDraft}
               onStartLayerNameEdit={startLayerNameEdit}
               onOpenLayerContextMenu={openComposeLayerContextMenu}
+              onOpenSubcomposition={onOpenSubcomposition}
               onSelectLayer={selectLayer}
               onToggleExpanded={toggleLayerExpanded}
               onToggleEaseExpanded={toggleEaseExpanded}
@@ -1182,12 +1360,65 @@ function ComposeKeyframeMarquee({
   );
 }
 
-function ComposeTimelineLayerHeader() {
+function ComposeTimelineLayerHeader({
+  breadcrumbs,
+  onBackFromSubcomposition,
+  onSelectComposeDrillDepth,
+}: {
+  breadcrumbs: Array<{ id: string; label: string }>;
+  onBackFromSubcomposition?: () => void;
+  onSelectComposeDrillDepth?: (depth: number) => void;
+}) {
+  const canGoBack = breadcrumbs.length > 1 && Boolean(onBackFromSubcomposition);
   return (
     <div className="grid h-full min-w-0 flex-1 grid-cols-[32px_36px_minmax(0,1fr)_220px] items-center border-b border-[#2d313b] text-[10px] font-extrabold uppercase text-[#7f8796]">
-      <span />
+      <button
+        className="ml-1 grid h-5 w-5 place-items-center rounded-[4px] text-[#8f98a8] transition enabled:hover:bg-[#202633] enabled:hover:text-[#dfe2ea] disabled:opacity-30"
+        title="Back to parent composition"
+        disabled={!canGoBack}
+        onClick={onBackFromSubcomposition}
+      >
+        <ChevronLeft size={13} strokeWidth={2.6} />
+      </button>
       <span className="text-center">#</span>
-      <span className="truncate px-1">Layer Name</span>
+      <span className="flex min-w-0 items-center gap-1 px-1 normal-case tracking-normal">
+        {breadcrumbs.length ? (
+          breadcrumbs.map((item, index) => {
+            const current = index === breadcrumbs.length - 1;
+            return (
+              <span
+                key={`${item.id}-${index}`}
+                className="flex min-w-0 items-center gap-1"
+              >
+                {index > 0 ? (
+                  <ChevronRight
+                    aria-hidden="true"
+                    className="shrink-0 text-[#596171]"
+                    size={10}
+                    strokeWidth={2.6}
+                  />
+                ) : null}
+                <button
+                  className={`min-w-0 truncate rounded-[4px] px-1 py-0.5 text-left transition ${
+                    current
+                      ? "cursor-default text-[#dfe2ea]"
+                      : "text-[#9aa3b5] hover:bg-[#202633] hover:text-[#dfe2ea]"
+                  }`}
+                  title={item.label}
+                  disabled={current || !onSelectComposeDrillDepth}
+                  onClick={() => onSelectComposeDrillDepth?.(index)}
+                >
+                  {item.label}
+                </button>
+              </span>
+            );
+          })
+        ) : (
+          <span className="truncate uppercase tracking-[0.08em]">
+            Layer Name
+          </span>
+        )}
+      </span>
       <span className="truncate px-2">Parent & Link</span>
     </div>
   );
@@ -1228,6 +1459,7 @@ function ComposeTimelineRailRow({
   onDraftChange,
   onStartLayerNameEdit,
   onOpenLayerContextMenu,
+  onOpenSubcomposition,
   onSelectLayer,
   onToggleExpanded,
   onToggleEaseExpanded,
@@ -1254,6 +1486,10 @@ function ComposeTimelineRailRow({
   onOpenLayerContextMenu: (
     event: ReactMouseEvent<HTMLElement>,
     layer: ComposeAnimationTimelineLayer,
+  ) => void;
+  onOpenSubcomposition?: (
+    compositionId: string,
+    sourceObjectId?: string | null,
   ) => void;
   onSelectLayer: (layer: ComposeAnimationTimelineLayer) => void;
   onToggleExpanded: (layerId: string) => void;
@@ -1341,6 +1577,16 @@ function ComposeTimelineRailRow({
     );
   }
 
+  function handleLayerDoubleClick(event: ReactMouseEvent<HTMLDivElement>) {
+    const target = event.target as HTMLElement;
+    if (target.closest("[data-timeline-control]")) return;
+    const subcompositionId = getLayerSubcompositionId(row.layer);
+    if (!subcompositionId) return;
+    event.preventDefault();
+    event.stopPropagation();
+    onOpenSubcomposition?.(subcompositionId, row.layer.object?.id ?? null);
+  }
+
   return (
     <div
       className={`grid h-full grid-cols-[32px_36px_minmax(0,1fr)_220px] items-center border border-transparent border-b-[#202633] ${row.layer.hidden ? "opacity-40" : ""} ${
@@ -1349,6 +1595,7 @@ function ComposeTimelineRailRow({
       data-compose-parent-drop-layer-id={
         row.layer.object ? row.layer.id : undefined
       }
+      onDoubleClick={handleLayerDoubleClick}
       onContextMenu={(event) => onOpenLayerContextMenu(event, row.layer)}
       onPointerDown={(event) => {
         if (event.button !== 0) return;
@@ -2666,6 +2913,16 @@ function areComposeAnimationTimelinePanelPropsEqual(
     previous.scrubbingRef === next.scrubbingRef &&
     previous.scrubSnapEnabled === next.scrubSnapEnabled &&
     previous.selectedObjectIds === next.selectedObjectIds &&
+    previous.breadcrumbs === next.breadcrumbs &&
+    previous.onBackFromSubcomposition === next.onBackFromSubcomposition &&
+    previous.onSelectComposeDrillDepth === next.onSelectComposeDrillDepth &&
+    previous.onOpenSubcomposition === next.onOpenSubcomposition &&
+    previous.onSetComposeDrawTool === next.onSetComposeDrawTool &&
+    previous.onAddComposeNullObject === next.onAddComposeNullObject &&
+    previous.onAddComposeCamera === next.onAddComposeCamera &&
+    previous.onAddComposeMediaObject === next.onAddComposeMediaObject &&
+    previous.onAddComposeCodeObject === next.onAddComposeCodeObject &&
+    previous.onAddSubcomposition === next.onAddSubcomposition &&
     previous.timelineLayers === next.timelineLayers &&
     previous.timelineViewportState === next.timelineViewportState
   );

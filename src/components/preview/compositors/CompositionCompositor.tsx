@@ -78,6 +78,12 @@ type CompositionCompositorProps = {
     event: ReactMouseEvent<HTMLDivElement>,
     object: FrameObject,
   ) => void;
+  compositionLibrary?: CompositionClip[];
+  compositionAncestors?: readonly string[];
+  onSubcompositionDoubleClick?: (
+    compositionId: string,
+    sourceObjectId?: string | null,
+  ) => void;
   selectedObjectId?: string | null;
   onCameraPropsChange?: (
     cameraObjectId: string,
@@ -184,6 +190,9 @@ export const CompositionCompositor = memo(function CompositionCompositor(
         onTextEditCommit={props.onTextEditCommit}
         onTextEditEnd={props.onTextEditEnd}
         onTextObjectDoubleClick={props.onTextObjectDoubleClick}
+        compositionLibrary={props.compositionLibrary}
+        compositionAncestors={props.compositionAncestors}
+        onSubcompositionDoubleClick={props.onSubcompositionDoubleClick}
       />
     ),
     [
@@ -215,6 +224,9 @@ export const CompositionCompositor = memo(function CompositionCompositor(
       props.onTextEditCommit,
       props.onTextEditEnd,
       props.onTextObjectDoubleClick,
+      props.compositionLibrary,
+      props.compositionAncestors,
+      props.onSubcompositionDoubleClick,
     ],
   );
 
