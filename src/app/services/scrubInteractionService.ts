@@ -48,7 +48,7 @@ export type ThrottledCommitState<T> = {
 
 export type NumberScrubPointerLock = {
   locked: () => boolean;
-  release: () => void;
+  release: (onUnlocked?: () => void) => void;
 };
 
 export type NumberScrubVirtualCursor = {
@@ -196,6 +196,23 @@ export function scheduleThrottledCommit<T>(
   );
 }
 
+type ActiveLockInstance = {
+  onUnlocked: Set<() => void>;
+  released: boolean;
+};
+
+let activeLockInstance: ActiveLockInstance | null = null;
+
+function createActiveLockInstance(): ActiveLockInstance {
+  return { onUnlocked: new Set(), released: false };
+}
+
+function notifyPointerLockUnlocked(instance: ActiveLockInstance) {
+  const callbacks = [...instance.onUnlocked];
+  instance.onUnlocked.clear();
+  for (const callback of callbacks) callback();
+}
+
 export function requestNumberScrubPointerLock(
   doc: Document,
 ): NumberScrubPointerLock | null {
@@ -203,47 +220,78 @@ export function requestNumberScrubPointerLock(
   const supported = "pointerLockElement" in doc;
   if (!body || !supported || !body.requestPointerLock) return null;
 
-  let released = false;
-
-  const exitLock = () => {
-    if (doc.pointerLockElement) {
-      doc.exitPointerLock();
-    }
-  };
-
-  const delayExit = () => {
-    // A short 20ms timeout allows the browser's pointer lock state
-    // transitions to fully settle before executing the unlock command,
-    // which prevents the browser from ignoring exitPointerLock() during
-    // rapid repetitive locking/unlocking.
-    setTimeout(exitLock, 20);
-  };
-
   // Already locked from a previous scrub — reuse, don't re-request.
   // Calling requestPointerLock() while locked triggers pointerlockerror,
   // which would schedule exit mid-scrub.
   if (doc.pointerLockElement) {
+    const instance =
+      activeLockInstance && !activeLockInstance.released
+        ? activeLockInstance
+        : createActiveLockInstance();
+    activeLockInstance = instance;
+    let releaseListenerAttached = false;
+
+    function completeReleaseIfUnlocked() {
+      if (doc.pointerLockElement) return;
+      doc.removeEventListener(
+        "pointerlockchange",
+        completeReleaseIfUnlocked,
+        false,
+      );
+      releaseListenerAttached = false;
+      if (activeLockInstance === instance) activeLockInstance = null;
+      notifyPointerLockUnlocked(instance);
+    }
+
     return {
-      locked: () => !released && doc.pointerLockElement !== null,
-      release: () => {
-        if (released) return;
-        released = true;
-        if (doc.pointerLockElement) delayExit();
+      locked: () => !instance.released && doc.pointerLockElement !== null,
+      release: (onUnlocked) => {
+        if (onUnlocked) instance.onUnlocked.add(onUnlocked);
+        if (instance.released) return;
+        instance.released = true;
+        if (doc.pointerLockElement) {
+          if (!releaseListenerAttached) {
+            releaseListenerAttached = true;
+            doc.addEventListener(
+              "pointerlockchange",
+              completeReleaseIfUnlocked,
+              false,
+            );
+          }
+          doc.exitPointerLock();
+        } else {
+          completeReleaseIfUnlocked();
+        }
       },
     };
   }
 
+  const lockState = createActiveLockInstance();
+  activeLockInstance = lockState;
+
+  let cleanedUp = false;
   function cleanup() {
+    if (cleanedUp) return;
+    cleanedUp = true;
     doc.removeEventListener("pointerlockchange", handleLockChange, false);
     doc.removeEventListener("pointerlockerror", onPointerError, false);
+    if (activeLockInstance === lockState) {
+      activeLockInstance = null;
+    }
+  }
+
+  function completeRelease() {
+    cleanup();
+    notifyPointerLockUnlocked(lockState);
   }
 
   function handleLockChange() {
-    if (released) {
+    if (lockState.released) {
       if (doc.pointerLockElement) {
-        delayExit();
+        doc.exitPointerLock();
+      } else {
+        completeRelease();
       }
-      cleanup();
     } else {
       if (!doc.pointerLockElement) {
         cleanup();
@@ -253,12 +301,17 @@ export function requestNumberScrubPointerLock(
 
   function onPointerError(event: Event) {
     console.error("PointerLock error occurred:", event);
-    cleanup();
+    if (lockState.released) {
+      completeRelease();
+    } else {
+      cleanup();
+    }
   }
 
   try {
     body.requestPointerLock();
   } catch {
+    activeLockInstance = null;
     return null;
   }
 
@@ -266,13 +319,15 @@ export function requestNumberScrubPointerLock(
   doc.addEventListener("pointerlockerror", onPointerError, false);
 
   return {
-    locked: () => !released && doc.pointerLockElement !== null,
-    release: () => {
-      if (released) return;
-      released = true;
+    locked: () => !lockState.released && doc.pointerLockElement !== null,
+    release: (onUnlocked) => {
+      if (onUnlocked) lockState.onUnlocked.add(onUnlocked);
+      if (lockState.released) return;
+      lockState.released = true;
       if (doc.pointerLockElement) {
-        delayExit();
-        cleanup();
+        doc.exitPointerLock();
+      } else if (cleanedUp) {
+        completeRelease();
       }
     },
   };

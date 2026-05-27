@@ -195,6 +195,91 @@ describe("scrub interaction service", () => {
     expect(doc.addEventListener).not.toHaveBeenCalled();
   });
 
+  it("waits for pointer lock exit before running release callbacks", () => {
+    const listeners = new Map<string, (event: Event) => void>();
+    const body = { requestPointerLock: vi.fn() } as unknown as HTMLElement;
+    const doc = {
+      addEventListener: vi.fn(
+        (type: string, listener: EventListenerOrEventListenerObject) => {
+          listeners.set(
+            type,
+            typeof listener === "function"
+              ? listener
+              : listener.handleEvent.bind(listener),
+          );
+        },
+      ),
+      body,
+      exitPointerLock: vi.fn(() => {
+        doc.pointerLockElement = null;
+      }),
+      pointerLockElement: null as Element | null,
+      removeEventListener: vi.fn(),
+    } as unknown as Document & { pointerLockElement: Element | null };
+    const dispatch = (type: string) => listeners.get(type)?.(new Event(type));
+
+    const pointerLock = requestNumberScrubPointerLock(doc);
+    Object.defineProperty(doc, "pointerLockElement", {
+      configurable: true,
+      value: body,
+      writable: true,
+    });
+    dispatch("pointerlockchange");
+
+    const onUnlocked = vi.fn();
+    pointerLock?.release(onUnlocked);
+
+    expect(doc.exitPointerLock).toHaveBeenCalledOnce();
+    expect(onUnlocked).not.toHaveBeenCalled();
+
+    dispatch("pointerlockchange");
+
+    expect(onUnlocked).toHaveBeenCalledOnce();
+  });
+
+  it("releases a late-granted pointer lock before running callbacks", () => {
+    const listeners = new Map<string, (event: Event) => void>();
+    const body = { requestPointerLock: vi.fn() } as unknown as HTMLElement;
+    const doc = {
+      addEventListener: vi.fn(
+        (type: string, listener: EventListenerOrEventListenerObject) => {
+          listeners.set(
+            type,
+            typeof listener === "function"
+              ? listener
+              : listener.handleEvent.bind(listener),
+          );
+        },
+      ),
+      body,
+      exitPointerLock: vi.fn(),
+      pointerLockElement: null as Element | null,
+      removeEventListener: vi.fn(),
+    } as unknown as Document & { pointerLockElement: Element | null };
+    const dispatch = (type: string) => listeners.get(type)?.(new Event(type));
+
+    const pointerLock = requestNumberScrubPointerLock(doc);
+    const onUnlocked = vi.fn();
+    pointerLock?.release(onUnlocked);
+
+    expect(onUnlocked).not.toHaveBeenCalled();
+
+    Object.defineProperty(doc, "pointerLockElement", {
+      configurable: true,
+      value: body,
+      writable: true,
+    });
+    dispatch("pointerlockchange");
+
+    expect(doc.exitPointerLock).toHaveBeenCalledOnce();
+    expect(onUnlocked).not.toHaveBeenCalled();
+
+    doc.pointerLockElement = null;
+    dispatch("pointerlockchange");
+
+    expect(onUnlocked).toHaveBeenCalledOnce();
+  });
+
   it("moves the virtual cursor using rounded movement and returns horizontal delta", () => {
     const cursorNode = {
       className: "",

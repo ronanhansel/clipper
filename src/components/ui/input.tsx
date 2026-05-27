@@ -138,23 +138,42 @@ export function Input({
       const scrub = scrubRef.current;
       if (!scrub) return;
 
-      setScrubDraftValue(null);
       if (scrub.input.hasPointerCapture(scrub.pointerId))
         scrub.input.releasePointerCapture(scrub.pointerId);
       scrub.input.style.cursor = scrub.initialInputCursor;
-      scrub.virtualCursor.cleanup();
-      scrub.pointerLock?.release();
       cancelThrottledCommit(scrub.commitState);
       scrubRef.current = null;
-      if (restore) restoreScrubValue(scrub);
-      else if (commit) {
-        // Always commit via the input event so controlled inputs and higher-level
-        // handlers (e.g. keyframed inspector commits) run consistently for typing
-        // and scrubbing. `onCommit` remains as an optional side hook.
-        commitNumberInputValue(scrub.input);
-        scrub.onCommit?.(scrub.value);
+
+      const inputToCommit = scrub.input;
+      const onCommitCb = scrub.onCommit;
+      const onEndCb = scrub.onEnd;
+      const scrubVal = scrub.value;
+
+      const finishScrub = () => {
+        scrub.virtualCursor.cleanup();
+        const scheduler = inputToCommit.ownerDocument.defaultView ?? window;
+        scheduler.requestAnimationFrame(() => {
+          scheduler.requestAnimationFrame(() => {
+            scheduler.setTimeout(() => {
+              setScrubDraftValue(null);
+              if (restore) {
+                restoreScrubValue(scrub);
+              } else if (commit) {
+                commitNumberInputValue(inputToCommit);
+                onCommitCb?.(scrubVal);
+              }
+              onEndCb?.();
+            }, 0);
+          });
+        });
+      };
+
+      if (scrub.pointerLock) {
+        scrub.pointerLock.release(finishScrub);
+      } else {
+        finishScrub();
       }
-      scrub.onEnd?.();
+
       numberScrubActiveRef.current = false;
       window.dispatchEvent(new Event(numberInputScrubEndEvent));
       if (cleanupDeferred) detachScrubListeners();
