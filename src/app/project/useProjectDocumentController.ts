@@ -124,6 +124,7 @@ export type UseProjectDocumentControllerInput = {
   timelineModeRef: MutableRefObject<TimelineMode>;
   uiPersistRef: MutableRefObject<{
     selectedComposeObjectIds: string[];
+    threeAuthorView?: EditorState["threeAuthorView"];
   }>;
 };
 
@@ -175,6 +176,7 @@ export function useProjectDocumentController({
   const autosaveWriteQueueRef = useRef<Promise<void>>(Promise.resolve());
   const autosaveTimeoutRef = useRef(0);
   const implicitFileOperationSaveTimeoutRef = useRef(0);
+  const uiPersistTimeoutRef = useRef(0);
   const latestAutosaveVersionRef = useRef(0);
   const pendingFileOperationsRef = useRef(0);
   const sourceUpdateVersionRef = useRef<Record<string, number>>({});
@@ -629,17 +631,24 @@ export function useProjectDocumentController({
 
   function withUiPersistedFields(project: ProjectManifest): ProjectManifest {
     const ids = uiPersistRef.current.selectedComposeObjectIds;
+    const threeAuthorView =
+      uiPersistRef.current.threeAuthorView ??
+      project.editorState?.threeAuthorView;
     return {
       ...project,
       editorState: {
         ...(project.editorState ?? defaultEditorState),
         selectedComposeObjectIds: ids.length ? ids : undefined,
+        threeAuthorView,
       },
     };
   }
 
   function requestUiPersist() {
-    scheduleAutosave(projectRef.current);
+    window.clearTimeout(uiPersistTimeoutRef.current);
+    uiPersistTimeoutRef.current = window.setTimeout(() => {
+      scheduleAutosave(projectRef.current);
+    }, 2000);
   }
 
   async function saveProject(
@@ -655,36 +664,30 @@ export function useProjectDocumentController({
       projectToSave === projectRef.current
         ? compositionSourcesRef.current
         : getProjectCompositionSources(projectWithUi);
-    const embeddedProject = normalizeProject({
-      ...projectWithUi,
-      compositionSources: syncedSources,
-    });
-    const persistedProject = serializeProjectForSave(embeddedProject);
-    const projectSnapshot = getProjectContentSnapshot(persistedProject);
-    const compositionSourcesSnapshot = JSON.stringify(
-      persistedProject.compositionSources ?? {},
-    );
     const autosaveVersion = options.autosaveVersion;
     const shouldApplySaveResult = () =>
       autosaveVersion === undefined ||
       autosaveVersion === latestAutosaveVersionRef.current;
 
     setIsFileSystemBusy(true);
+
     const write = async () => {
+      if (!shouldApplySaveResult()) return;
+      const { json, projectSnapshot, compositionSourcesSnapshot } =
+        await projectPersistenceService.serializeProjectInWorker(
+          projectWithUi,
+          syncedSources,
+        );
       if (!shouldApplySaveResult()) return;
       const result = await projectPersistenceService.saveProject({
         projectPath: activeProjectManifestPathRef.current,
-        project: persistedProject,
+        project: projectToSave,
+        json,
       });
       if (!shouldApplySaveResult()) return;
-      const nextSavedProjectSnapshot = result.projectSnapshot
-        ? getProjectContentSnapshot(
-            JSON.parse(result.projectSnapshot) as ProjectManifest,
-          )
-        : projectSnapshot;
-      setSavedProjectSnapshot(nextSavedProjectSnapshot);
+      setSavedProjectSnapshot(projectSnapshot);
       setSavedCompositionSourcesSnapshot(compositionSourcesSnapshot);
-      savedProjectSnapshotRef.current = nextSavedProjectSnapshot;
+      savedProjectSnapshotRef.current = projectSnapshot;
       savedCompositionSourcesSnapshotRef.current = compositionSourcesSnapshot;
       setLastSavedAt(Date.now());
       setSourceStatus(result.sourceStatus);
@@ -722,10 +725,10 @@ export function useProjectDocumentController({
       projectOverride === projectRef.current
         ? compositionSourcesRef.current
         : getProjectCompositionSources(projectWithUi);
-    const projectToSave = normalizeProject({
+    const projectToSave = {
       ...projectWithUi,
       compositionSources: projectSources,
-    });
+    };
     const saveVersion = ++latestAutosaveVersionRef.current;
     window.clearTimeout(autosaveTimeoutRef.current);
     autosaveTimeoutRef.current = window.setTimeout(() => {
@@ -755,10 +758,10 @@ export function useProjectDocumentController({
       projectOverride === projectRef.current
         ? compositionSourcesRef.current
         : getProjectCompositionSources(projectWithUi);
-    const projectToSave = normalizeProject({
+    const projectToSave = {
       ...projectWithUi,
       compositionSources: projectSources,
-    });
+    };
     const saveVersion = ++latestAutosaveVersionRef.current;
     window.clearTimeout(implicitFileOperationSaveTimeoutRef.current);
     implicitFileOperationSaveTimeoutRef.current = window.setTimeout(() => {
@@ -842,6 +845,7 @@ export function useProjectDocumentController({
     () => () => {
       window.clearTimeout(autosaveTimeoutRef.current);
       window.clearTimeout(implicitFileOperationSaveTimeoutRef.current);
+      window.clearTimeout(uiPersistTimeoutRef.current);
     },
     [],
   );

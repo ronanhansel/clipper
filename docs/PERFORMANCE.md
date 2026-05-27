@@ -86,6 +86,20 @@ direct DOM/WebGL updates and fan out through React/store subscribers. The drag
 path may still emit a preview event, but that event must follow the coalescing
 rule above.
 
+Coalescing choice affects feel. `requestAnimationFrame` coalescing can keep the
+preview on the next frame; post-paint scheduling (`rAF` followed by
+`setTimeout(0)`) intentionally waits until after a paint. Use post-paint only
+when the first paint is the important feedback (for example playhead chrome
+moving before expensive preview work). If the preview itself must follow the
+cursor, use latest-rAF coalescing and make the preview work cheap enough for
+that frame.
+
+Scrub render causes must flow to the renderer. Transient scrub frames should
+skip final-quality work that can be reused or refreshed after the gesture, such
+as shadow-map rebuilds, expensive readbacks, or full diagnostic passes. Do not
+let a parent React commit path bypass the scheduler cause and accidentally run
+the heavier idle/playback render path during pointer movement.
+
 ## Direct GPU post-process
 
 Direct GPU effects run through `CompositionRenderer` and must stay on the

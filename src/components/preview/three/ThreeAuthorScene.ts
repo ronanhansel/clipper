@@ -408,6 +408,7 @@ export class ThreeAuthorScene {
   private dragStateCallback: ((active: boolean) => void) | null = null;
   private selectCallback: ((picked: string | null) => void) | null = null;
   private viewStateCallback: ((state: ThreeOrbitState) => void) | null = null;
+  private orbitViewStateDirty = false;
   private objectDragCallback:
     | ((
         objectId: string,
@@ -582,8 +583,8 @@ export class ThreeAuthorScene {
     this.syncOrbitPanSpeed();
     this.orbit.addEventListener("change", () => {
       this.syncOrbitPanSpeed();
+      this.orbitViewStateDirty = true;
       this.requestRender();
-      if (this.viewStateCallback) this.viewStateCallback(this.getOrbitState());
     });
 
     // Two transform controls so the user gets translate arrows AND rotate
@@ -868,6 +869,7 @@ export class ThreeAuthorScene {
     this.orbit.target.set(state.targetX, state.targetY, state.targetZ);
     this.syncOrbitPanSpeed();
     this.orbit.update();
+    this.orbitViewStateDirty = false;
     this.requestRender();
   }
 
@@ -1623,7 +1625,11 @@ export class ThreeAuthorScene {
     if (this.rafHandle) return;
     this.rafHandle = requestAnimationFrame(() => {
       this.rafHandle = 0;
-      this.orbit.update();
+      const orbitChanged = this.orbit.update();
+      if (!orbitChanged && this.orbitViewStateDirty) {
+        this.orbitViewStateDirty = false;
+        this.viewStateCallback?.(this.getOrbitState());
+      }
       this.render();
     });
   }

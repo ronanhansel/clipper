@@ -82,7 +82,13 @@ export function LightObjectSection() {
   function previewNumber(path: string, value: number) {
     const clamped = clampForPath(path, value);
     if (onPreview) {
-      onPreview((current) => setPropertyBaseValue(current, path, clamped));
+      onPreview((current) =>
+        setPropertyBaseValue(
+          evaluateObjectState(current, readEffectiveTime()) as FrameObject,
+          path,
+          clamped,
+        ),
+      );
     }
   }
 
@@ -99,7 +105,13 @@ export function LightObjectSection() {
   function previewColor(value: string) {
     const path = "props.color";
     if (onPreview) {
-      onPreview((current) => setPropertyBaseValue(current, path, value));
+      onPreview((current) =>
+        setPropertyBaseValue(
+          evaluateObjectState(current, readEffectiveTime()) as FrameObject,
+          path,
+          value,
+        ),
+      );
     }
   }
 

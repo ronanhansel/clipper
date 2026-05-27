@@ -1,15 +1,11 @@
+import { ChevronDown } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { mutedCaps } from "../../../app/config";
 import { clipperHost } from "../../../app/clipperHost";
 import { graphicDefaultFontFamily } from "../../../core/graphics/inspectorSettings";
-import {
-  Select,
-  SelectContent,
-  SelectGroup,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "../../ui/select";
+import { cn } from "../../../lib/utils";
+import { Input } from "../../ui/input";
+import { Popover, PopoverContent, PopoverTrigger } from "../../ui/popover";
 
 export type FontOption = { value: string; label: string; source?: string };
 
@@ -21,6 +17,7 @@ export const defaultFontOption: FontOption = {
 
 let cachedSystemFontOptions: FontOption[] | null = null;
 let systemFontOptionsRequest: Promise<FontOption[]> | null = null;
+const maxVisibleFontOptions = 80;
 
 export function preloadSystemFontOptions() {
   void loadSystemFontOptions();
@@ -75,6 +72,8 @@ export function FontSelector({
   const [systemFontOptions, setSystemFontOptions] = useState<FontOption[]>(
     cachedSystemFontOptions ?? [],
   );
+  const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState("");
   const fontOptions = useMemo(() => {
     const merged = [defaultFontOption, ...systemFontOptions];
     if (value && !merged.some((option) => option.value === value)) {
@@ -82,6 +81,29 @@ export function FontSelector({
     }
     return merged;
   }, [systemFontOptions, value]);
+  const selectedFontLabel = useMemo(
+    () =>
+      fontOptions.find((option) => option.value === value)?.label ??
+      formatFontValueLabel(value),
+    [fontOptions, value],
+  );
+  const visibleFontOptions = useMemo(() => {
+    const normalizedQuery = query.trim().toLowerCase();
+    const selectedOption = fontOptions.find((option) => option.value === value);
+    const matches = normalizedQuery
+      ? fontOptions.filter((option) =>
+          option.label.toLowerCase().includes(normalizedQuery),
+        )
+      : fontOptions;
+    const capped = matches.slice(0, maxVisibleFontOptions);
+    if (
+      selectedOption &&
+      !capped.some((option) => option.value === selectedOption.value)
+    ) {
+      return [selectedOption, ...capped.slice(0, maxVisibleFontOptions - 1)];
+    }
+    return capped;
+  }, [fontOptions, query, value]);
 
   useEffect(() => {
     // Already populated from cache -- skip the async round-trip and the extra
@@ -108,46 +130,76 @@ export function FontSelector({
     }
   }, [fontOptions, fontSource, onResolveFontSource, value]);
 
+  function selectFont(option: FontOption) {
+    onChange(option.value, option);
+    setOpen(false);
+    setQuery("");
+  }
+
   return (
     <label className={`grid gap-1.5 ${mutedCaps}`}>
       Font
       <span className="relative block">
-        <Select
-          value={value}
-          onValueChange={(nextValue) =>
-            onChange(
-              nextValue,
-              fontOptions.find((option) => option.value === nextValue),
-            )
-          }
+        <Popover
+          open={open}
+          onOpenChange={(nextOpen) => {
+            setOpen(nextOpen);
+            if (!nextOpen) setQuery("");
+          }}
         >
-          <SelectTrigger
-            className={`h-[42px] rounded-[10px] px-3 text-xs font-bold text-[#dfe2ea] ${onToggleKeyframe ? "pl-8" : ""} ${hasKeyframe ? "border-white" : ""}`}
-          >
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectGroup>
-              {fontOptions.map((option) => (
-                <SelectItem
+          <PopoverTrigger asChild>
+            <button
+              aria-expanded={open}
+              className={cn(
+                "flex h-[42px] w-full min-w-0 cursor-pointer items-center justify-between gap-2 rounded-[10px] border border-[#2d313b] bg-[#171920] px-3 text-xs font-bold text-[#dfe2ea] outline-none transition hover:border-[var(--clipper-accent)] focus:border-[var(--clipper-accent)] focus:ring-2 focus:ring-[rgb(var(--clipper-accent-rgb)/0.2)]",
+                onToggleKeyframe ? "pl-8" : "",
+                hasKeyframe ? "border-white" : "",
+              )}
+              type="button"
+            >
+              <span className="min-w-0 flex-1 truncate text-left">
+                {selectedFontLabel}
+              </span>
+              <ChevronDown className="size-3.5 shrink-0 text-[#9b9da7]" />
+            </button>
+          </PopoverTrigger>
+          <PopoverContent className="w-[var(--radix-popover-trigger-width)] gap-2 p-2">
+            <Input
+              autoFocus
+              className="h-8"
+              placeholder="Search fonts"
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+            />
+            <div className="grid max-h-72 overflow-y-auto pr-1" role="listbox">
+              {visibleFontOptions.map((option) => (
+                <button
                   key={option.value}
-                  value={option.value}
-                  style={
-                    option.value === defaultFontFamily
-                      ? undefined
-                      : {
-                          fontFamily: `"${option.value}", ${defaultFontFamily}`,
-                          contentVisibility: "auto",
-                          containIntrinsicSize: "26px",
-                        }
-                  }
+                  aria-selected={option.value === value}
+                  className={cn(
+                    "min-w-0 rounded-[7px] px-2 py-1.5 text-left text-xs font-bold text-[#dfe2ea] outline-none transition hover:bg-[#252936] focus:bg-[#252936]",
+                    option.value === value ? "bg-[#2f3442] text-white" : "",
+                  )}
+                  role="option"
+                  type="button"
+                  onClick={() => selectFont(option)}
                 >
-                  {option.label}
-                </SelectItem>
+                  <span className="block truncate">{option.label}</span>
+                </button>
               ))}
-            </SelectGroup>
-          </SelectContent>
-        </Select>
+              {visibleFontOptions.length === 0 ? (
+                <div className="px-2 py-2 text-xs font-bold text-[#858b99]">
+                  No fonts found
+                </div>
+              ) : null}
+              {fontOptions.length > visibleFontOptions.length ? (
+                <div className="px-2 py-2 text-[11px] font-bold text-[#858b99]">
+                  Showing {visibleFontOptions.length} of {fontOptions.length}
+                </div>
+              ) : null}
+            </div>
+          </PopoverContent>
+        </Popover>
         {onToggleKeyframe ? (
           <button
             aria-label={

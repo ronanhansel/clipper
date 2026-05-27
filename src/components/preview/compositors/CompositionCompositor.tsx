@@ -1,6 +1,8 @@
 import {
   useEffect,
   memo,
+  useCallback,
+  useMemo,
   useRef,
   useState,
   type MouseEvent as ReactMouseEvent,
@@ -148,40 +150,99 @@ export const CompositionCompositor = memo(function CompositionCompositor(
   const cameraHandledExternally = showAuthorView && previewMode !== "2d";
   const authoringInteractionsEnabled = !showAuthorView || previewMode === "2d";
 
-  const backendNode = (
-    <Backend
-      active={props.active}
-      isPostProcessSource={props.isPostProcessSource}
-      cameraPreviewOverride={props.cameraPreviewOverride}
-      activeShapeTool={
-        authoringInteractionsEnabled ? props.activeShapeTool : null
-      }
-      animationsEnabled={props.animationsEnabled}
-      cameraHandledExternally={cameraHandledExternally}
-      canSelect={authoringInteractionsEnabled ? props.canSelect : false}
-      duration={composition.duration}
-      editingTextObjectId={
-        authoringInteractionsEnabled ? props.editingTextObjectId : null
-      }
-      exportTileFrameBounds={props.exportTileFrameBounds}
-      focusPicking={authoringInteractionsEnabled ? props.focusPicking : false}
-      frameScale={props.frameScale}
-      previewFps={props.previewFps}
-      hideNullObjects={props.hideNullObjects ?? false}
-      hostRef={compositionRef}
-      isPlaying={props.isPlaying}
-      localTime={composition.localTime}
-      part={renderPart}
-      renderClockSceneTime={props.renderClockSceneTime}
-      renderMode={props.renderMode}
-      adjustmentLayers={props.adjustmentLayers}
-      transitionLayers={props.transitionLayers}
-      onObjectPointerDown={props.onObjectPointerDown}
-      onObjectContextMenu={props.onObjectContextMenu}
-      onTextEditCommit={props.onTextEditCommit}
-      onTextEditEnd={props.onTextEditEnd}
-      onTextObjectDoubleClick={props.onTextObjectDoubleClick}
-    />
+  const backendNode = useMemo(
+    () => (
+      <Backend
+        active={props.active}
+        isPostProcessSource={props.isPostProcessSource}
+        cameraPreviewOverride={props.cameraPreviewOverride}
+        activeShapeTool={
+          authoringInteractionsEnabled ? props.activeShapeTool : null
+        }
+        animationsEnabled={props.animationsEnabled}
+        cameraHandledExternally={cameraHandledExternally}
+        canSelect={authoringInteractionsEnabled ? props.canSelect : false}
+        duration={composition.duration}
+        editingTextObjectId={
+          authoringInteractionsEnabled ? props.editingTextObjectId : null
+        }
+        exportTileFrameBounds={props.exportTileFrameBounds}
+        focusPicking={authoringInteractionsEnabled ? props.focusPicking : false}
+        frameScale={props.frameScale}
+        previewFps={props.previewFps}
+        hideNullObjects={props.hideNullObjects ?? false}
+        hostRef={compositionRef}
+        isPlaying={props.isPlaying}
+        localTime={composition.localTime}
+        part={renderPart}
+        renderClockSceneTime={props.renderClockSceneTime}
+        renderMode={props.renderMode}
+        adjustmentLayers={props.adjustmentLayers}
+        transitionLayers={props.transitionLayers}
+        onObjectPointerDown={props.onObjectPointerDown}
+        onObjectContextMenu={props.onObjectContextMenu}
+        onTextEditCommit={props.onTextEditCommit}
+        onTextEditEnd={props.onTextEditEnd}
+        onTextObjectDoubleClick={props.onTextObjectDoubleClick}
+      />
+    ),
+    [
+      Backend,
+      props.active,
+      props.isPostProcessSource,
+      props.cameraPreviewOverride,
+      authoringInteractionsEnabled,
+      props.activeShapeTool,
+      props.animationsEnabled,
+      cameraHandledExternally,
+      props.canSelect,
+      composition.duration,
+      props.editingTextObjectId,
+      props.exportTileFrameBounds,
+      props.focusPicking,
+      props.frameScale,
+      props.previewFps,
+      props.hideNullObjects,
+      props.isPlaying,
+      composition.localTime,
+      renderPart,
+      props.renderClockSceneTime,
+      props.renderMode,
+      props.adjustmentLayers,
+      props.transitionLayers,
+      props.onObjectPointerDown,
+      props.onObjectContextMenu,
+      props.onTextEditCommit,
+      props.onTextEditEnd,
+      props.onTextObjectDoubleClick,
+    ],
+  );
+
+  const renderComposition = useCallback(() => backendNode, [backendNode]);
+
+  const pipBackendProps = useMemo(
+    () => ({
+      animationsEnabled: props.animationsEnabled,
+      frameScale: props.frameScale,
+      previewFps: props.previewFps,
+      hideNullObjects: props.hideNullObjects ?? false,
+      isPlaying: props.isPlaying,
+      duration: composition.duration,
+      renderClockSceneTime: props.renderClockSceneTime,
+      renderMode: props.renderMode,
+      exportTileFrameBounds: props.exportTileFrameBounds,
+    }),
+    [
+      props.animationsEnabled,
+      props.frameScale,
+      props.previewFps,
+      props.hideNullObjects,
+      props.isPlaying,
+      composition.duration,
+      props.renderClockSceneTime,
+      props.renderMode,
+      props.exportTileFrameBounds,
+    ],
   );
 
   if (showAuthorView && props.onCameraPropsChange) {
@@ -201,18 +262,8 @@ export const CompositionCompositor = memo(function CompositionCompositor(
           onObjectTransformChange={props.onObjectTransformChange}
           onContextMenu={props.onAuthorPreviewContextMenu}
           localTime={props.localTime}
-          renderComposition={() => backendNode}
-          pipBackendProps={{
-            animationsEnabled: props.animationsEnabled,
-            frameScale: props.frameScale,
-            previewFps: props.previewFps,
-            hideNullObjects: props.hideNullObjects ?? false,
-            isPlaying: props.isPlaying,
-            duration: composition.duration,
-            renderClockSceneTime: props.renderClockSceneTime,
-            renderMode: props.renderMode,
-            exportTileFrameBounds: props.exportTileFrameBounds,
-          }}
+          renderComposition={renderComposition}
+          pipBackendProps={pipBackendProps}
         />
       </div>
     );

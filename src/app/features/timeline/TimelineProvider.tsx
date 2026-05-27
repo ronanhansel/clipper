@@ -1,5 +1,6 @@
 import {
   createContext,
+  memo,
   useContext,
   useLayoutEffect,
   useRef,
@@ -53,7 +54,7 @@ export function useTimelineStore<T>(selector: (store: TimelineStore) => T) {
   return useStore(store, selector);
 }
 
-export function ConnectedTimelinePanel() {
+export const ConnectedTimelinePanel = memo(function ConnectedTimelinePanel() {
   const panelProps = useTimelineStore(useShallow((store) => store.panelProps));
   return <TimelinePanel {...panelProps} />;
-}
+});

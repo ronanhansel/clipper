@@ -11,6 +11,7 @@ import {
   StepBack,
   StepForward,
 } from "lucide-react";
+import { memo } from "react";
 import type { CSSProperties, Dispatch, RefObject, SetStateAction } from "react";
 import { FrameZoomBar } from "../../components/FrameZoomBar";
 import { QuickAccessTooltip } from "../../components/QuickAccessTooltip";
@@ -45,6 +46,90 @@ export type PlaybackBarProps = {
   updateFramePreviewScale: (scale: number) => void;
 };
 
+type PlaybackBorderScrubberInputProps = {
+  isPlaying: boolean;
+  previewColumnHovered: boolean;
+  playbackBorderScrubberRef: RefObject<HTMLInputElement | null>;
+  playbackDisplayDuration: number;
+  toPlaybackDisplayTime: (time: number) => number;
+  scrubToPlaybackDisplayTime: (time: number) => void;
+  pausePlaybackForTimelineScrub: () => void;
+  resumePlaybackAfterTimelineScrub: () => void;
+};
+
+const PlaybackBorderScrubberInput = memo(function PlaybackBorderScrubberInput({
+  isPlaying,
+  previewColumnHovered,
+  playbackBorderScrubberRef,
+  playbackDisplayDuration,
+  toPlaybackDisplayTime,
+  scrubToPlaybackDisplayTime,
+  pausePlaybackForTimelineScrub,
+  resumePlaybackAfterTimelineScrub,
+}: PlaybackBorderScrubberInputProps) {
+  const sceneTime = usePlayheadSceneTime(!isPlaying);
+  const playbackDisplayTime = clamp(
+    toPlaybackDisplayTime(sceneTime),
+    0,
+    playbackDisplayDuration,
+  );
+  const playbackProgress =
+    playbackDisplayDuration > 0
+      ? `${clamp(playbackDisplayTime / playbackDisplayDuration, 0, 1) * 100}%`
+      : "0%";
+  const playbackScrubberStyle = {
+    "--clipper-playback-progress": playbackProgress,
+  } as CSSProperties;
+
+  return (
+    <input
+      ref={playbackBorderScrubberRef}
+      aria-label="Playback scrubber"
+      className={`clipper-playback-border-scrubber relative top-[-8px] w-full transition-opacity duration-200 ${isPlaying && previewColumnHovered ? "pointer-events-auto opacity-100" : "pointer-events-none opacity-0"}`}
+      max={Math.max(playbackDisplayDuration, 0.001)}
+      min={0}
+      step={0.01}
+      style={playbackScrubberStyle}
+      type="range"
+      value={playbackDisplayTime}
+      onChange={(event) =>
+        scrubToPlaybackDisplayTime(Number(event.currentTarget.value))
+      }
+      onPointerCancel={(event) => {
+        resumePlaybackAfterTimelineScrub();
+        event.currentTarget.blur();
+      }}
+      onPointerDown={pausePlaybackForTimelineScrub}
+      onPointerUp={(event) => {
+        resumePlaybackAfterTimelineScrub();
+        event.currentTarget.blur();
+      }}
+    />
+  );
+});
+
+type PlaybackTimeLabelReadoutProps = {
+  isPlaying: boolean;
+  playbackTimeLabelRef: RefObject<HTMLSpanElement | null>;
+  formatPlaybackTimeLabel: (time: number) => string;
+};
+
+const PlaybackTimeLabelReadout = memo(function PlaybackTimeLabelReadout({
+  isPlaying,
+  playbackTimeLabelRef,
+  formatPlaybackTimeLabel,
+}: PlaybackTimeLabelReadoutProps) {
+  const sceneTime = usePlayheadSceneTime(!isPlaying);
+  return (
+    <span
+      ref={playbackTimeLabelRef}
+      className="justify-self-start text-[#9b9da7] tabular-nums"
+    >
+      {formatPlaybackTimeLabel(sceneTime)}
+    </span>
+  );
+});
+
 export function PlaybackBar({
   fastSelectEnabled,
   framePreviewScale,
@@ -72,55 +157,28 @@ export function PlaybackBar({
   togglePlayback,
   updateFramePreviewScale,
 }: PlaybackBarProps) {
-  const sceneTime = usePlayheadSceneTime(!isPlaying);
-  const playbackDisplayTime = clamp(
-    toPlaybackDisplayTime(sceneTime),
-    0,
-    playbackDisplayDuration,
-  );
-  const playbackProgress =
-    playbackDisplayDuration > 0
-      ? `${clamp(playbackDisplayTime / playbackDisplayDuration, 0, 1) * 100}%`
-      : "0%";
-  const playbackScrubberStyle = {
-    "--clipper-playback-progress": playbackProgress,
-  } as CSSProperties;
   return (
     <div
       className="relative grid h-full grid-cols-[1fr_auto_1fr] items-center border-t border-[#2d313b] bg-[#171920] px-7"
       data-clipper-playback-bar
     >
       <div className="pointer-events-none absolute inset-x-0 top-0 z-10 h-0">
-        <input
-          ref={playbackBorderScrubberRef}
-          aria-label="Playback scrubber"
-          className={`clipper-playback-border-scrubber relative top-[-8px] w-full transition-opacity duration-200 ${isPlaying && previewColumnHovered ? "pointer-events-auto opacity-100" : "pointer-events-none opacity-0"}`}
-          max={Math.max(playbackDisplayDuration, 0.001)}
-          min={0}
-          step={0.01}
-          style={playbackScrubberStyle}
-          type="range"
-          value={playbackDisplayTime}
-          onChange={(event) =>
-            scrubToPlaybackDisplayTime(Number(event.currentTarget.value))
-          }
-          onPointerCancel={(event) => {
-            resumePlaybackAfterTimelineScrub();
-            event.currentTarget.blur();
-          }}
-          onPointerDown={pausePlaybackForTimelineScrub}
-          onPointerUp={(event) => {
-            resumePlaybackAfterTimelineScrub();
-            event.currentTarget.blur();
-          }}
+        <PlaybackBorderScrubberInput
+          isPlaying={isPlaying}
+          previewColumnHovered={previewColumnHovered}
+          playbackBorderScrubberRef={playbackBorderScrubberRef}
+          playbackDisplayDuration={playbackDisplayDuration}
+          toPlaybackDisplayTime={toPlaybackDisplayTime}
+          scrubToPlaybackDisplayTime={scrubToPlaybackDisplayTime}
+          pausePlaybackForTimelineScrub={pausePlaybackForTimelineScrub}
+          resumePlaybackAfterTimelineScrub={resumePlaybackAfterTimelineScrub}
         />
       </div>
-      <span
-        ref={playbackTimeLabelRef}
-        className="justify-self-start text-[#9b9da7] tabular-nums"
-      >
-        {formatPlaybackTimeLabel(sceneTime)}
-      </span>
+      <PlaybackTimeLabelReadout
+        isPlaying={isPlaying}
+        playbackTimeLabelRef={playbackTimeLabelRef}
+        formatPlaybackTimeLabel={formatPlaybackTimeLabel}
+      />
       <div className="flex items-center justify-center gap-3">
         <QuickAccessTooltip
           name="Jump to start"

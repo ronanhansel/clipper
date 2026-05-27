@@ -6,15 +6,12 @@ import {
   type RefObject,
 } from "react";
 import {
-  cancelLatestPostPaint,
   cancelLatestRaf,
   cancelThrottledCommit,
-  createLatestPostPaintState,
   createLatestRafState,
   createThrottledCommitState,
-  flushLatestPostPaint,
+  flushLatestRaf,
   flushThrottledCommit,
-  scheduleLatestPostPaint,
   scheduleLatestRaf,
   scheduleThrottledCommit,
 } from "../../app/services/scrubInteractionService";
@@ -84,7 +81,7 @@ export function useTimelineScrubber({
     }>(),
   );
   const scrubEffectQueueRef = useRef(
-    createLatestPostPaintState<{
+    createLatestRafState<{
       time: number;
       commit: "throttled" | "immediate";
     }>(),
@@ -111,7 +108,7 @@ export function useTimelineScrubber({
       cancelLatestRaf(pendingScrubPreviewRef);
       if (scrubAutoScrollFrameRef.current)
         window.cancelAnimationFrame(scrubAutoScrollFrameRef.current);
-      cancelLatestPostPaint(pendingScrubEffectRef);
+      cancelLatestRaf(pendingScrubEffectRef);
       cancelThrottledCommit(pendingScrubCommitRef);
 
       const activeScrub = activeScrubRef.current;
@@ -205,7 +202,7 @@ export function useTimelineScrubber({
   }
 
   function flushPendingScrubEffect() {
-    flushLatestPostPaint(pendingScrubEffectRef, (next) =>
+    flushLatestRaf(pendingScrubEffectRef, (next) =>
       applyScrubEffect(next.time, next.commit),
     );
   }
@@ -214,7 +211,7 @@ export function useTimelineScrubber({
     time: number,
     commit: "throttled" | "immediate",
   ) {
-    scheduleLatestPostPaint(
+    scheduleLatestRaf(
       pendingScrubEffectRef,
       { time, commit },
       (next: ScrubEffectValue) => applyScrubEffect(next.time, next.commit),
@@ -230,7 +227,7 @@ export function useTimelineScrubber({
     const time = timeFromClientX(visibleScrubClientX(clientX), snap);
     previewScrubTime(time);
     if (effect === "sync") {
-      cancelLatestPostPaint(pendingScrubEffectRef);
+      cancelLatestRaf(pendingScrubEffectRef);
       applyScrubEffect(time, commit);
       return;
     }

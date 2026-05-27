@@ -1,8 +1,10 @@
 import {
   useEffect,
+  memo,
   useRef,
   useState,
   useSyncExternalStore,
+  useMemo,
   type MutableRefObject,
 } from "react";
 import { createPortal } from "react-dom";
@@ -41,11 +43,13 @@ import {
   type AdjustmentLayer,
   type CameraObjectProps,
   type CompositionClip,
+  type FrameObject,
   type TransitionLayer,
 } from "../../../core/types";
 import { defaultPreviewFps } from "../../../core/previewFps";
 import type { CompositionBackendProps } from "../backends/CompositionBackend";
 import { useOptionalPreviewRenderScheduler } from "../scheduler/PreviewRenderSchedulerContext";
+import type { RenderCause } from "../scheduler/usePreviewRenderScheduler";
 import type { TimelinePreviewStackPart } from "../../../core/timeline";
 
 export type DirectGpuTransitionComposite = {
@@ -124,7 +128,9 @@ const maxDirectSourceSlots = 12;
  * source must remain in the DOM (not `display: none`) so layout/paint
  * runs and the capture path can read pixels.
  */
-export function DirectCompositionGpuHost(props: DirectCompositionGpuHostProps) {
+export const DirectCompositionGpuHost = memo(function DirectCompositionGpuHost(
+  props: DirectCompositionGpuHostProps,
+) {
   const { part, localTime, backendProps } = props;
   const hostRef = useRef<HTMLDivElement | null>(null);
   const sourceContainerRefs = useRef(new Map<string, HTMLDivElement | null>());
@@ -134,7 +140,9 @@ export function DirectCompositionGpuHost(props: DirectCompositionGpuHostProps) {
   const rendererRef = useRef<CompositionRenderer | null>(null);
   const composerPassSignatureRef = useRef("");
   const pendingCameraPreviewRef = useRef<CameraObjectProps | null>(null);
+  const pendingObjectPreviewRef = useRef<FrameObject | null>(null);
   const cameraPreviewFrameRef = useRef<number>(0);
+  const liveClockFallbackFrameRef = useRef<number>(0);
   const scheduler = useOptionalPreviewRenderScheduler();
   const [portalTarget, setPortalTarget] = useState<HTMLDivElement | null>(null);
   const [captureCanvas, setCaptureCanvas] = useState<HTMLCanvasElement | null>(
@@ -154,15 +162,6 @@ export function DirectCompositionGpuHost(props: DirectCompositionGpuHostProps) {
     getCodeObjectComponentTick,
     getCodeObjectComponentTick,
   );
-  useSyncExternalStore(
-    subscribeMasterTimelineClock,
-    () => getMasterTimelineClockSnapshot().sequence,
-    () => getMasterTimelineClockSnapshot().sequence,
-  );
-  const masterClockSnapshot = getMasterTimelineClockSnapshot();
-  const liveSceneTime = isMasterClockLive(masterClockSnapshot)
-    ? masterClockSnapshot.adjustedSceneTime
-    : backendProps.renderClockSceneTime;
   const liveLocalTimeOffset = localTime - backendProps.renderClockSceneTime;
   const transitionFromLocalTimeOffset =
     props.transitionComposite == null
@@ -175,11 +174,14 @@ export function DirectCompositionGpuHost(props: DirectCompositionGpuHostProps) {
       : props.transitionComposite.to.localTime -
         props.transitionComposite.to.sceneTime;
   const renderPreviewFps = backendProps.previewFps ?? defaultPreviewFps;
+  const liveSceneTime = useDirectLiveSceneFrame(
+    backendProps.renderClockSceneTime,
+    renderPreviewFps,
+  );
   const sourceSlotCacheRef = useRef<DirectSourceSlotCache>({ stacks: [] });
-  const liveLocalTime = isMasterClockLive(masterClockSnapshot)
-    ? Math.round((liveSceneTime + liveLocalTimeOffset) * renderPreviewFps) /
-      renderPreviewFps
-    : localTime;
+  const liveLocalTime =
+    Math.round((liveSceneTime + liveLocalTimeOffset) * renderPreviewFps) /
+    renderPreviewFps;
   const liveTransitionTimes = props.transitionComposite
     ? getDirectTransitionLocalTimes(
         props.transitionComposite,
@@ -205,6 +207,15 @@ export function DirectCompositionGpuHost(props: DirectCompositionGpuHostProps) {
           props.transitionComposite.to.localTime,
       }
     : null;
+  const activePartIds = useMemo(() => {
+    const ids = new Set<string>([part.id]);
+    if (props.transitionComposite) {
+      ids.add(props.transitionComposite.to.part.id);
+      ids.add(props.transitionComposite.from.part.id);
+    }
+    return ids;
+  }, [part.id, props.transitionComposite]);
+
   const currentSourceSlots = updateDirectSourceSlotsForLiveSceneTime(
     props.sourceSlots && props.sourceSlots.length > 0
       ? props.sourceSlots
@@ -216,6 +227,7 @@ export function DirectCompositionGpuHost(props: DirectCompositionGpuHostProps) {
           localTime: liveTransitionTimes?.fromLocalTime,
         }
       : null,
+    activePartIds,
   );
   const activeSourceSlot =
     currentSourceSlots.find((slot) => slot.part.id === part.id) ??
@@ -241,14 +253,29 @@ export function DirectCompositionGpuHost(props: DirectCompositionGpuHostProps) {
         null)
       : null;
 
+  function partWithPreviewObject(
+    objectOverride?: FrameObject | null,
+  ): CompositionClip {
+    if (!objectOverride) return part;
+    let matched = false;
+    const objects = part.objects.map((object) => {
+      if (object.id !== objectOverride.id) return object;
+      matched = true;
+      return objectOverride;
+    });
+    return matched ? { ...part, objects } : part;
+  }
+
   function renderAtTime(
     renderer: CompositionRenderer,
     time: number,
     cameraOverride?: CameraObjectProps | null,
     options: { syncShadows?: boolean; isPlaying?: boolean } = {},
+    objectOverride?: FrameObject | null,
   ) {
+    const renderPart = partWithPreviewObject(objectOverride);
     const cameraProps =
-      cameraOverride ?? getActiveCameraObjectProps(part, time);
+      cameraOverride ?? getActiveCameraObjectProps(renderPart, time);
     renderer.setCamera(cameraProps);
     const composerPasses = buildCameraComposerPasses(cameraProps, {
       width: FRAME_WIDTH,
@@ -270,7 +297,7 @@ export function DirectCompositionGpuHost(props: DirectCompositionGpuHostProps) {
       { width: FRAME_WIDTH, height: FRAME_HEIGHT },
     ).livePasses;
     renderer.setGpuPostProcessPasses(postProcessPasses);
-    renderer.setComposition(part, time, activeSourceContainer(), {
+    renderer.setComposition(renderPart, time, activeSourceContainer(), {
       isPlaying: options.isPlaying === true,
       syncShadows: options.syncShadows,
     });
@@ -506,7 +533,8 @@ export function DirectCompositionGpuHost(props: DirectCompositionGpuHostProps) {
 
   useEffect(() => {
     if (!captureCanvas) return;
-    const renderLiveFrame = (_cause: unknown, now: number) => {
+    const renderLiveFrame = (cause: RenderCause, now: number) => {
+      void now;
       const renderer = rendererRef.current;
       if (!renderer) return;
       const snap = getMasterTimelineClockSnapshot();
@@ -515,20 +543,47 @@ export function DirectCompositionGpuHost(props: DirectCompositionGpuHostProps) {
         : localTime;
       const nextLocalTime =
         Math.round(rawLocalTime * renderPreviewFps) / renderPreviewFps;
+      const cameraOverride = pendingCameraPreviewRef.current;
+      const objectOverride = pendingObjectPreviewRef.current;
+      const renderOptions = {
+        isPlaying: cause === "play-tick",
+        syncShadows: cameraOverride || objectOverride ? false : undefined,
+      };
       if (props.transitionComposite && transitionCaptureCanvas) {
         renderTransitionAtSceneTime(renderer, snap.adjustedSceneTime, {
-          isPlaying: true,
+          isPlaying: renderOptions.isPlaying,
+          syncShadows: undefined,
         });
         return;
       }
-      const cameraOverride = pendingCameraPreviewRef.current;
       pendingCameraPreviewRef.current = null;
-      renderAtTime(renderer, nextLocalTime, cameraOverride, {
-        isPlaying: true,
-      });
+      pendingObjectPreviewRef.current = null;
+      renderAtTime(
+        renderer,
+        nextLocalTime,
+        cameraOverride,
+        renderOptions,
+        objectOverride,
+      );
     };
-    const unsubscribe = scheduler?.subscribe(renderLiveFrame);
-    return () => unsubscribe?.();
+    const unsubscribeScheduler = scheduler?.subscribe(renderLiveFrame);
+    const unsubscribeClock = subscribeMasterTimelineClock(() => {
+      const snap = getMasterTimelineClockSnapshot();
+      if (!isMasterClockLive(snap)) return;
+      if (liveClockFallbackFrameRef.current) return;
+      liveClockFallbackFrameRef.current = requestAnimationFrame((now) => {
+        liveClockFallbackFrameRef.current = 0;
+        renderLiveFrame("scrub", now);
+      });
+    });
+    return () => {
+      unsubscribeScheduler?.();
+      unsubscribeClock();
+      if (liveClockFallbackFrameRef.current) {
+        cancelAnimationFrame(liveClockFallbackFrameRef.current);
+        liveClockFallbackFrameRef.current = 0;
+      }
+    };
     // renderAtTime closes over current part/localTime inputs.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
@@ -542,40 +597,32 @@ export function DirectCompositionGpuHost(props: DirectCompositionGpuHostProps) {
     transitionCaptureCanvas,
   ]);
 
-  useEffect(() => {
-    if (!captureCanvas || !scheduler) return;
-    return subscribeMasterTimelineClock(() => {
-      const snap = getMasterTimelineClockSnapshot();
-      if (!isMasterClockLive(snap)) return;
-      scheduler.requestRender("scrub");
-    });
-  }, [captureCanvas, scheduler]);
-
-  useEffect(() => {
-    if (!captureCanvas) return;
-    const renderPendingCameraPreview = () => {
+  function scheduleInspectorPreviewRender() {
+    if (scheduler) {
+      scheduler.requestRender("edit");
+    }
+    if (cameraPreviewFrameRef.current) return;
+    cameraPreviewFrameRef.current = requestAnimationFrame(() => {
+      cameraPreviewFrameRef.current = 0;
       const renderer = rendererRef.current;
       const cameraOverride = pendingCameraPreviewRef.current;
-      if (!renderer || !cameraOverride) return;
+      const objectOverride = pendingObjectPreviewRef.current;
+      if (!renderer || (!cameraOverride && !objectOverride)) return;
       pendingCameraPreviewRef.current = null;
-      renderAtTime(renderer, localTime, cameraOverride, {
-        syncShadows: false,
-      });
-    };
-    const unsubscribe = scheduler?.subscribe((cause) => {
-      if (cause !== "edit") return;
-      renderPendingCameraPreview();
+      pendingObjectPreviewRef.current = null;
+      renderAtTime(
+        renderer,
+        localTime,
+        cameraOverride,
+        { syncShadows: false },
+        objectOverride,
+      );
     });
-    return () => unsubscribe?.();
-    // renderAtTime closes over current part/localTime inputs.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [captureCanvas, localTime, part, scheduler]);
+  }
 
-  // Live scrub from the inspector dispatches `clipper:camera-preview`
-  // with the next CameraObjectProps. Apply imperatively so the
-  // through-camera output (Direct mode + the compose PIP) updates
-  // instantly without a React commit, matching `ComposeAuthorView`'s
-  // wireframe-frustum preview path.
+  // Live scrub from the inspector dispatches preview events. Apply
+  // imperatively so the right-side through-camera output updates without a
+  // React commit, matching `ComposeAuthorView`'s wireframe preview path.
   useEffect(() => {
     function handleCameraPreview(event: Event) {
       const detail = (event as CustomEvent).detail as
@@ -585,25 +632,23 @@ export function DirectCompositionGpuHost(props: DirectCompositionGpuHostProps) {
       const camera = findActiveCameraObject(part, localTime);
       if (!camera || camera.id !== detail.objectId) return;
       pendingCameraPreviewRef.current = detail.props;
-      if (scheduler) {
-        scheduler.requestRender("edit");
+      scheduleInspectorPreviewRender();
+    }
+    function handleLightPreview(event: Event) {
+      const detail = (event as CustomEvent).detail as
+        | { object: FrameObject }
+        | undefined;
+      if (!detail?.object || detail.object.type !== "light") return;
+      if (!part.objects.some((object) => object.id === detail.object.id))
         return;
-      }
-      if (cameraPreviewFrameRef.current) return;
-      cameraPreviewFrameRef.current = requestAnimationFrame(() => {
-        cameraPreviewFrameRef.current = 0;
-        const renderer = rendererRef.current;
-        const cameraOverride = pendingCameraPreviewRef.current;
-        if (!renderer || !cameraOverride) return;
-        pendingCameraPreviewRef.current = null;
-        renderAtTime(renderer, localTime, cameraOverride, {
-          syncShadows: false,
-        });
-      });
+      pendingObjectPreviewRef.current = detail.object;
+      scheduleInspectorPreviewRender();
     }
     window.addEventListener("clipper:camera-preview", handleCameraPreview);
+    window.addEventListener("clipper:light-preview", handleLightPreview);
     return () => {
       window.removeEventListener("clipper:camera-preview", handleCameraPreview);
+      window.removeEventListener("clipper:light-preview", handleLightPreview);
       if (cameraPreviewFrameRef.current) {
         cancelAnimationFrame(cameraPreviewFrameRef.current);
         cameraPreviewFrameRef.current = 0;
@@ -624,16 +669,30 @@ export function DirectCompositionGpuHost(props: DirectCompositionGpuHostProps) {
       {captureCanvas
         ? createPortal(
             <>
-              {directSourceSlots.map((slot) => (
-                <DirectCompositionGpuSourceSlot
-                  key={getDirectSourceSlotKey(slot)}
-                  slotKey={getDirectSourceSlotKey(slot)}
-                  slot={slot}
-                  active={getDirectSourceSlotKey(slot) === activeSourceSlotKey}
-                  backendProps={backendProps}
-                  sourceContainerRefs={sourceContainerRefs}
-                />
-              ))}
+              {directSourceSlots.map((slot) => {
+                const isActive =
+                  getDirectSourceSlotKey(slot) === activeSourceSlotKey;
+                return (
+                  <DirectCompositionGpuSourceSlot
+                    key={getDirectSourceSlotKey(slot)}
+                    slotKey={getDirectSourceSlotKey(slot)}
+                    slot={slot}
+                    active={isActive}
+                    animationsEnabled={
+                      isActive ? backendProps.animationsEnabled : false
+                    }
+                    exportTileFrameBounds={backendProps.exportTileFrameBounds}
+                    previewFps={backendProps.previewFps}
+                    hideNullObjects={backendProps.hideNullObjects ?? false}
+                    isPlaying={isActive ? backendProps.isPlaying : false}
+                    renderClockSceneTime={
+                      isActive ? backendProps.renderClockSceneTime : undefined
+                    }
+                    renderMode={backendProps.renderMode}
+                    sourceContainerRefs={sourceContainerRefs}
+                  />
+                );
+              })}
             </>,
             captureCanvas,
           )
@@ -645,13 +704,16 @@ export function DirectCompositionGpuHost(props: DirectCompositionGpuHostProps) {
                 slotKey={transitionToSourceSlotKey!}
                 slot={transitionToSourceSlot}
                 active={true}
-                backendProps={{
-                  ...backendProps,
-                  duration: transitionToSourceSlot.part.duration,
-                  renderClockSceneTime:
-                    props.transitionComposite?.to.sceneTime ??
-                    backendProps.renderClockSceneTime,
-                }}
+                animationsEnabled={backendProps.animationsEnabled}
+                exportTileFrameBounds={backendProps.exportTileFrameBounds}
+                previewFps={backendProps.previewFps}
+                hideNullObjects={backendProps.hideNullObjects ?? false}
+                isPlaying={backendProps.isPlaying}
+                renderClockSceneTime={
+                  props.transitionComposite?.to.sceneTime ??
+                  backendProps.renderClockSceneTime
+                }
+                renderMode={backendProps.renderMode}
                 sourceContainerRefs={transitionSourceContainerRefs}
                 sourceKind="transition-to"
               />
@@ -661,7 +723,7 @@ export function DirectCompositionGpuHost(props: DirectCompositionGpuHostProps) {
         : null}
     </>
   );
-}
+});
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function disposeComposerPasses(passes: readonly any[]) {
@@ -672,6 +734,28 @@ function disposeComposerPasses(passes: readonly any[]) {
 
 function clampNumber(value: number, min: number, max: number) {
   return Math.min(Math.max(value, min), max);
+}
+
+function useDirectLiveSceneFrame(
+  fallbackSceneTime: number,
+  previewFps: number,
+) {
+  return useSyncExternalStore(
+    subscribeMasterTimelineClock,
+    () => readDirectLiveSceneFrame(fallbackSceneTime, previewFps),
+    () => readDirectLiveSceneFrame(fallbackSceneTime, previewFps),
+  );
+}
+
+function readDirectLiveSceneFrame(
+  fallbackSceneTime: number,
+  previewFps: number,
+) {
+  const snap = getMasterTimelineClockSnapshot();
+  const sceneTime = isMasterClockLive(snap)
+    ? snap.adjustedSceneTime
+    : fallbackSceneTime;
+  return Math.round(sceneTime * previewFps) / previewFps;
 }
 
 function getDirectTransitionLocalTimes(
@@ -710,8 +794,12 @@ function updateDirectSourceSlotsForLiveSceneTime(
   slots: TimelinePreviewStackPart[],
   sceneTime: number,
   transitionFrom: { partId: string; localTime?: number } | null,
+  activePartIds: Set<string>,
 ): TimelinePreviewStackPart[] {
   return slots.map((slot) => {
+    if (!activePartIds.has(slot.part.id)) {
+      return slot;
+    }
     const previewTime =
       transitionFrom?.partId === slot.part.id &&
       transitionFrom.localTime != null
@@ -793,65 +881,79 @@ export function getDirectSourceSlotCacheSlots(
   return slots;
 }
 
-function DirectCompositionGpuSourceSlot({
-  slotKey,
-  slot,
-  active,
-  backendProps,
-  sourceContainerRefs,
-  sourceKind,
-}: {
-  slotKey: string;
-  slot: TimelinePreviewStackPart;
-  active: boolean;
-  backendProps: DirectCompositionGpuHostProps["backendProps"];
-  sourceContainerRefs: MutableRefObject<Map<string, HTMLDivElement | null>>;
-  sourceKind?: string;
-}) {
-  const sourceContainerRef = useRef<HTMLDivElement | null>(null);
-  useEffect(() => {
-    sourceContainerRefs.current.set(slotKey, sourceContainerRef.current);
-    return () => {
-      sourceContainerRefs.current.delete(slotKey);
-    };
-  }, [slotKey, sourceContainerRefs]);
-  return (
-    <div
-      ref={sourceContainerRef}
-      data-clipper-composition-gpu-source={sourceKind ?? ""}
-      aria-hidden="true"
-      inert={true}
-      style={SOURCE_INNER_STYLE}
-    >
-      <DomBackend
-        active={false}
-        activeShapeTool={null}
-        animationsEnabled={active ? backendProps.animationsEnabled : false}
-        canSelect={false}
-        cameraHandledExternally={true}
-        duration={slot.part.duration}
-        editingTextObjectId={null}
-        exportTileFrameBounds={backendProps.exportTileFrameBounds}
-        focusPicking={false}
-        frameScale={1}
-        previewFps={backendProps.previewFps}
-        hideNullObjects={backendProps.hideNullObjects ?? false}
-        hostRef={sourceContainerRef}
-        isPlaying={active ? backendProps.isPlaying : false}
-        localTime={slot.previewTime}
-        part={slot.part}
-        renderClockSceneTime={
-          active
-            ? backendProps.renderClockSceneTime
-            : slot.start + slot.previewTime
-        }
-        renderMode={backendProps.renderMode}
-        onObjectPointerDown={NOOP_OBJECT_POINTER}
-        onObjectContextMenu={undefined}
-        onTextEditCommit={NOOP_TEXT_COMMIT}
-        onTextEditEnd={undefined}
-        onTextObjectDoubleClick={NOOP_OBJECT_DOUBLE_CLICK}
-      />
-    </div>
-  );
-}
+const DirectCompositionGpuSourceSlot = memo(
+  function DirectCompositionGpuSourceSlot({
+    slotKey,
+    slot,
+    active,
+    animationsEnabled,
+    exportTileFrameBounds,
+    previewFps,
+    hideNullObjects,
+    isPlaying,
+    renderClockSceneTime,
+    renderMode,
+    sourceContainerRefs,
+    sourceKind,
+  }: {
+    slotKey: string;
+    slot: TimelinePreviewStackPart;
+    active: boolean;
+    animationsEnabled: boolean;
+    exportTileFrameBounds: any;
+    previewFps: CompositionBackendProps["previewFps"];
+    hideNullObjects: boolean;
+    isPlaying: boolean;
+    renderClockSceneTime?: number;
+    renderMode: CompositionBackendProps["renderMode"];
+    sourceContainerRefs: MutableRefObject<Map<string, HTMLDivElement | null>>;
+    sourceKind?: string;
+  }) {
+    const sourceContainerRef = useRef<HTMLDivElement | null>(null);
+    useEffect(() => {
+      sourceContainerRefs.current.set(slotKey, sourceContainerRef.current);
+      return () => {
+        sourceContainerRefs.current.delete(slotKey);
+      };
+    }, [slotKey, sourceContainerRefs]);
+    return (
+      <div
+        ref={sourceContainerRef}
+        data-clipper-composition-gpu-source={sourceKind ?? ""}
+        aria-hidden="true"
+        inert={true}
+        style={SOURCE_INNER_STYLE}
+      >
+        <DomBackend
+          active={false}
+          activeShapeTool={null}
+          animationsEnabled={animationsEnabled}
+          canSelect={false}
+          cameraHandledExternally={true}
+          duration={slot.part.duration}
+          editingTextObjectId={null}
+          exportTileFrameBounds={exportTileFrameBounds}
+          focusPicking={false}
+          frameScale={1}
+          previewFps={previewFps}
+          hideNullObjects={hideNullObjects}
+          hostRef={sourceContainerRef}
+          isPlaying={isPlaying}
+          localTime={slot.previewTime}
+          part={slot.part}
+          renderClockSceneTime={
+            active && renderClockSceneTime !== undefined
+              ? renderClockSceneTime
+              : slot.start + slot.previewTime
+          }
+          renderMode={renderMode}
+          onObjectPointerDown={NOOP_OBJECT_POINTER}
+          onObjectContextMenu={undefined}
+          onTextEditCommit={NOOP_TEXT_COMMIT}
+          onTextEditEnd={undefined}
+          onTextObjectDoubleClick={NOOP_OBJECT_DOUBLE_CLICK}
+        />
+      </div>
+    );
+  },
+);

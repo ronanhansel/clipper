@@ -1,5 +1,6 @@
 import {
   useEffect,
+  memo,
   useMemo,
   useRef,
   useState,
@@ -8,7 +9,10 @@ import {
 import { createPortal } from "react-dom";
 import {
   ThreeAuthorScene,
+  type ThreeAuthorCameraObject,
+  type ThreeAuthorLightObject,
   type ThreeAuthorObjectTransformUpdate,
+  type ThreeAuthorPickableObject,
   type ThreeOrbitState,
 } from "./ThreeAuthorScene";
 import { DirectCompositionGpuHost } from "./DirectCompositionGpuHost";
@@ -24,11 +28,19 @@ import {
   FRAME_WIDTH,
   type CameraObjectProps,
   type CompositionClip,
+  type FrameObject,
 } from "../../../core/types";
+import {
+  getMasterTimelineClockSnapshot,
+  isMasterClockLive,
+  subscribeMasterTimelineClock,
+} from "../../../app/features/playback/playbackTimeStore";
+import { defaultPreviewFps } from "../../../core/previewFps";
 import { buildCameraPathData } from "./buildCameraPathData";
 import type { CameraPathHandle } from "./cameraPathOverlay";
 import type { CompositionBackendProps } from "../backends/CompositionBackend";
 import { resolveLightTargetFromTransform } from "./lightObjectTransform";
+import { useOptionalPreviewRenderScheduler } from "../scheduler/PreviewRenderSchedulerContext";
 
 export type CameraPreviewMode = "pip" | "side-by-side" | "2d";
 export type ComposeAuthorViewState = {
@@ -141,6 +153,172 @@ function resolveAuthorCameraProps(
     ? override
     : evaluateCameraObjectPropsAt(cameraObject, localTime);
   return applyCameraTargetAutomation(part, sourceObject, localTime, evaluated);
+}
+
+function buildAuthorCameraObjects(
+  part: CompositionClip,
+  localTime: number,
+  selectedObjectId: string | null,
+): ThreeAuthorCameraObject[] {
+  const activeCamera = findActiveCameraObject(part, localTime);
+  return part.objects
+    .filter((object) => object.type === "camera" && !object.hidden)
+    .map((object) => ({
+      id: object.id,
+      props: resolveAuthorCameraProps(part, object, localTime),
+      active: object.id === activeCamera?.id,
+      selected: object.id === selectedObjectId,
+    }));
+}
+
+function buildAuthorLightObject(
+  object: CompositionClip["objects"][number],
+  localTime: number,
+  selectedObjectId: string | null,
+): ThreeAuthorLightObject {
+  const evaluated = evaluateObjectState(object, localTime);
+  return buildAuthorLightObjectFromState(
+    evaluated as FrameObject,
+    selectedObjectId,
+  );
+}
+
+function buildAuthorLightObjectFromState(
+  object: FrameObject,
+  selectedObjectId: string | null,
+): ThreeAuthorLightObject {
+  const transform =
+    object.transform && typeof object.transform === "object"
+      ? object.transform
+      : {};
+  const value =
+    object.props && typeof object.props === "object" ? object.props : {};
+  return {
+    id: object.id,
+    bounds: object.bounds,
+    transform,
+    kind:
+      value.kind === "ambient" ||
+      value.kind === "directional" ||
+      value.kind === "point" ||
+      value.kind === "spot"
+        ? value.kind
+        : "directional",
+    color: typeof value.color === "string" ? value.color : "#fff4d6",
+    intensity: typeof value.intensity === "number" ? value.intensity : 1,
+    range: readNumber(value.range, 1200),
+    angle: readNumber(value.angle, 45),
+    softness: readNumber(value.softness, 0.25),
+    debug: value.debug !== false,
+    showRange: value.showRange !== false,
+    selected: object.id === selectedObjectId,
+    target: resolveAuthorLightTarget(object.bounds, transform, value.target),
+  };
+}
+
+function buildAuthorLightObjects(
+  part: CompositionClip,
+  localTime: number,
+  selectedObjectId: string | null,
+): ThreeAuthorLightObject[] {
+  return part.objects
+    .filter((object) => object.type === "light" && !object.hidden)
+    .map((object) =>
+      buildAuthorLightObject(object, localTime, selectedObjectId),
+    );
+}
+
+function buildAuthorPickableObjects(
+  part: CompositionClip,
+  localTime: number,
+): ThreeAuthorPickableObject[] {
+  return part.objects
+    .filter(
+      (object) => object.type !== "camera" && !object.hidden && object.threeD,
+    )
+    .map((object) => {
+      const state = evaluateObjectState(object, localTime);
+      return buildAuthorPickableObjectFromState(state as FrameObject);
+    });
+}
+
+function buildAuthorPickableObjectFromState(
+  object: FrameObject,
+): ThreeAuthorPickableObject {
+  return {
+    id: object.id,
+    bounds: object.bounds,
+    transform: typeof object.transform === "object" ? object.transform : {},
+  };
+}
+
+function buildAuthorPickableObjectsWithPreview(
+  part: CompositionClip,
+  localTime: number,
+  previewObject: FrameObject,
+): ThreeAuthorPickableObject[] {
+  return part.objects
+    .filter(
+      (object) => object.type !== "camera" && !object.hidden && object.threeD,
+    )
+    .map((object) =>
+      object.id === previewObject.id
+        ? buildAuthorPickableObjectFromState(previewObject)
+        : buildAuthorPickableObjectFromState(
+            evaluateObjectState(object, localTime) as FrameObject,
+          ),
+    );
+}
+
+function syncAuthorSceneAtTime(
+  scene: ThreeAuthorScene,
+  part: CompositionClip,
+  localTime: number,
+  selectedObjectId: string | null,
+) {
+  const activeCamera = findActiveCameraObject(part, localTime);
+  scene.setActiveCamera(
+    getActiveCameraObjectProps(part, localTime),
+    activeCamera?.id ?? null,
+  );
+  scene.setCameraObjects(
+    buildAuthorCameraObjects(part, localTime, selectedObjectId),
+  );
+  scene.setLightObjects(
+    buildAuthorLightObjects(part, localTime, selectedObjectId),
+  );
+  scene.setPickableObjects(buildAuthorPickableObjects(part, localTime));
+
+  const selectedCamera = part.objects.find(
+    (object) =>
+      object.id === selectedObjectId &&
+      object.type === "camera" &&
+      !object.hidden,
+  );
+  if (selectedCamera) {
+    scene.setSelectedObject(null, null, null);
+    scene.setSelectedCameraObjectId(selectedCamera.id);
+    return;
+  }
+
+  scene.setSelectedCameraObjectId(null);
+  const selectedObject = part.objects.find(
+    (object) =>
+      object.id === selectedObjectId &&
+      object.type !== "camera" &&
+      !object.hidden &&
+      object.threeD,
+  );
+  if (!selectedObject) {
+    scene.setSelectedObject(null, null, null);
+    return;
+  }
+  const evaluated = evaluateObjectState(selectedObject, localTime);
+  scene.setSelectedObject(
+    selectedObject.id,
+    evaluated.bounds,
+    typeof evaluated.transform === "object" ? evaluated.transform : {},
+  );
 }
 
 function useFitFrameSize() {
@@ -333,11 +511,14 @@ export interface ComposeAuthorViewProps {
  * the PIP without DoF — phase 2 routes DoF passes through the renderer's
  * composer so Direct + PIP share the same post-process path.
  */
-export function ComposeAuthorView(props: ComposeAuthorViewProps) {
+export const ComposeAuthorView = memo(function ComposeAuthorView(
+  props: ComposeAuthorViewProps,
+) {
   const sceneHostRef = useRef<HTMLDivElement | null>(null);
   const sideBySidePreviewRef = useRef<HTMLDivElement | null>(null);
   const sideBySideDividerRef = useRef<HTMLDivElement | null>(null);
   const sceneRef = useRef<ThreeAuthorScene | null>(null);
+  const scheduler = useOptionalPreviewRenderScheduler();
   const draggingRef = useRef(false);
   const pendingDragRef = useRef<{
     objectId: string;
@@ -349,7 +530,6 @@ export function ComposeAuthorView(props: ComposeAuthorViewProps) {
   } | null>(null);
   const flushHandleRef = useRef<number>(0);
   const objectFlushHandleRef = useRef<number>(0);
-  const orbitPersistTimeoutRef = useRef<number>(0);
   const sideBySideResizeFrameRef = useRef<number>(0);
   const [planeTarget, setPlaneTarget] = useState<HTMLElement | null>(null);
   const [previewMode, setPreviewMode] = useState<CameraPreviewMode>(
@@ -358,6 +538,10 @@ export function ComposeAuthorView(props: ComposeAuthorViewProps) {
   const [sideBySideSplit, setSideBySideSplit] = useState(
     props.authorViewState?.sideBySideSplit ?? 0.5,
   );
+  const liveLocalTimeOffset =
+    props.localTime - props.pipBackendProps.renderClockSceneTime;
+  const authorPreviewFps =
+    props.pipBackendProps.previewFps ?? defaultPreviewFps;
   useEffect(() => {
     if (!props.authorViewState) return;
     setPreviewMode(coerceAuthorSceneMode(props.authorViewState.previewMode));
@@ -458,20 +642,8 @@ export function ComposeAuthorView(props: ComposeAuthorViewProps) {
     const scene = sceneRef.current;
     if (!scene) return;
     scene.onViewStateChange((orbit) => {
-      if (orbitPersistTimeoutRef.current) {
-        window.clearTimeout(orbitPersistTimeoutRef.current);
-      }
-      orbitPersistTimeoutRef.current = window.setTimeout(() => {
-        orbitPersistTimeoutRef.current = 0;
-        props.onAuthorViewStateChange?.({ orbit });
-      }, 250);
+      props.onAuthorViewStateChange?.({ orbit });
     });
-    return () => {
-      if (orbitPersistTimeoutRef.current) {
-        window.clearTimeout(orbitPersistTimeoutRef.current);
-        orbitPersistTimeoutRef.current = 0;
-      }
-    };
   }, [props.onAuthorViewStateChange]);
 
   useEffect(() => {
@@ -479,6 +651,50 @@ export function ComposeAuthorView(props: ComposeAuthorViewProps) {
     if (!scene) return;
     scene.setHandToolActive(props.handToolActive);
   }, [props.handToolActive]);
+
+  useEffect(() => {
+    const syncLivePreview = () => {
+      const scene = sceneRef.current;
+      if (!scene || draggingRef.current) return;
+      const snap = getMasterTimelineClockSnapshot();
+      if (!isMasterClockLive(snap)) return;
+      const localTime =
+        Math.round(
+          (snap.adjustedSceneTime + liveLocalTimeOffset) * authorPreviewFps,
+        ) / authorPreviewFps;
+      syncAuthorSceneAtTime(
+        scene,
+        props.part,
+        localTime,
+        props.selectedObjectId,
+      );
+    };
+
+    const schedulerUnsubscribe = scheduler?.subscribe((cause) => {
+      if (cause !== "play-tick" && cause !== "scrub") return;
+      syncLivePreview();
+    });
+    if (schedulerUnsubscribe) return schedulerUnsubscribe;
+
+    let frame = 0;
+    const unsubscribeClock = subscribeMasterTimelineClock(() => {
+      if (frame) return;
+      frame = requestAnimationFrame(() => {
+        frame = 0;
+        syncLivePreview();
+      });
+    });
+    return () => {
+      if (frame) cancelAnimationFrame(frame);
+      unsubscribeClock();
+    };
+  }, [
+    authorPreviewFps,
+    liveLocalTimeOffset,
+    props.part,
+    props.selectedObjectId,
+    scheduler,
+  ]);
 
   // Wire the drag callback whenever the part / callback changes. Mid-drag
   // updates stay imperative so camera gizmos match object gizmo performance;
@@ -636,58 +852,72 @@ export function ComposeAuthorView(props: ComposeAuthorViewProps) {
       window.removeEventListener("clipper:camera-preview", handleCameraPreview);
   }, [props.localTime, props.part, props.selectedObjectId]);
 
+  useEffect(() => {
+    function handleLightPreview(event: Event) {
+      const detail = (event as CustomEvent).detail as
+        | { object: FrameObject }
+        | undefined;
+      if (!detail?.object || detail.object.type !== "light") return;
+      const scene = sceneRef.current;
+      if (!scene) return;
+      scene.setLightObjects(
+        props.part.objects
+          .filter((object) => object.type === "light" && !object.hidden)
+          .map((object) =>
+            object.id === detail.object.id
+              ? buildAuthorLightObjectFromState(
+                  detail.object,
+                  props.selectedObjectId,
+                )
+              : buildAuthorLightObject(
+                  object,
+                  props.localTime,
+                  props.selectedObjectId,
+                ),
+          ),
+      );
+      scene.setPickableObjects(
+        buildAuthorPickableObjectsWithPreview(
+          props.part,
+          props.localTime,
+          detail.object,
+        ),
+      );
+      const sourceObject = props.part.objects.find(
+        (object) => object.id === detail.object.id,
+      );
+      if (
+        detail.object.id === props.selectedObjectId &&
+        sourceObject?.threeD &&
+        !sourceObject.hidden
+      ) {
+        scene.setSelectedObject(
+          detail.object.id,
+          detail.object.bounds,
+          typeof detail.object.transform === "object"
+            ? detail.object.transform
+            : {},
+        );
+      }
+      scene.render();
+    }
+    window.addEventListener("clipper:light-preview", handleLightPreview);
+    return () =>
+      window.removeEventListener("clipper:light-preview", handleLightPreview);
+  }, [props.localTime, props.part, props.selectedObjectId]);
+
   // Sync active camera + gizmo selection. Skip during gizmo drag — the
   // scene drives its own visual feedback then.
   useEffect(() => {
     const scene = sceneRef.current;
     if (!scene) return;
     if (draggingRef.current) return;
-    const activeCamera = findActiveCameraObject(props.part, props.localTime);
-    scene.setActiveCamera(
-      getActiveCameraObjectProps(props.part, props.localTime),
-      activeCamera?.id ?? null,
+    syncAuthorSceneAtTime(
+      scene,
+      props.part,
+      props.localTime,
+      props.selectedObjectId,
     );
-    scene.setCameraObjects(
-      props.part.objects
-        .filter((object) => object.type === "camera" && !object.hidden)
-        .map((object) => ({
-          id: object.id,
-          props: resolveAuthorCameraProps(props.part, object, props.localTime),
-          active: object.id === activeCamera?.id,
-          selected: object.id === props.selectedObjectId,
-        })),
-    );
-    const selectedCamera = props.part.objects.find(
-      (object) =>
-        object.id === props.selectedObjectId &&
-        object.type === "camera" &&
-        !object.hidden,
-    );
-    const cameraSelected =
-      selectedCamera != null && props.selectedObjectId === selectedCamera.id;
-    if (cameraSelected) {
-      scene.setSelectedObject(null, null, null);
-      scene.setSelectedCameraObjectId(selectedCamera.id);
-    } else {
-      scene.setSelectedCameraObjectId(null);
-      const selectedObject = props.part.objects.find(
-        (object) =>
-          object.id === props.selectedObjectId &&
-          object.type !== "camera" &&
-          !object.hidden &&
-          object.threeD === true,
-      );
-      if (selectedObject) {
-        const evaluated = evaluateObjectState(selectedObject, props.localTime);
-        scene.setSelectedObject(
-          selectedObject.id,
-          evaluated.bounds,
-          typeof evaluated.transform === "object" ? evaluated.transform : {},
-        );
-      } else {
-        scene.setSelectedObject(null, null, null);
-      }
-    }
     scene.render();
   }, [props.part, props.selectedObjectId, props.localTime]);
 
@@ -893,72 +1123,6 @@ export function ComposeAuthorView(props: ComposeAuthorViewProps) {
     });
   }, [planeTarget, props.localTime, props.part]);
 
-  // Synchronize pickable 3D elements in the WebGL hit-testing scene.
-  useEffect(() => {
-    const scene = sceneRef.current;
-    if (!scene) return;
-    if (draggingRef.current) return;
-    const elements3d = props.part.objects
-      .filter(
-        (obj) => obj.type !== "camera" && !obj.hidden && obj.threeD === true,
-      )
-      .map((obj) => {
-        const state = evaluateObjectState(obj, props.localTime);
-        return {
-          id: obj.id,
-          bounds: state.bounds,
-          transform: typeof state.transform === "object" ? state.transform : {},
-        };
-      });
-    scene.setPickableObjects(elements3d);
-  }, [props.part, props.localTime]);
-
-  useEffect(() => {
-    const scene = sceneRef.current;
-    if (!scene) return;
-    scene.setLightObjects(
-      props.part.objects
-        .filter((object) => object.type === "light" && !object.hidden)
-        .map((object) => {
-          const evaluated = evaluateObjectState(object, props.localTime);
-          const transform =
-            evaluated.transform && typeof evaluated.transform === "object"
-              ? evaluated.transform
-              : {};
-          const value =
-            evaluated.props && typeof evaluated.props === "object"
-              ? evaluated.props
-              : {};
-          return {
-            id: object.id,
-            bounds: evaluated.bounds,
-            transform,
-            kind:
-              value.kind === "ambient" ||
-              value.kind === "directional" ||
-              value.kind === "point" ||
-              value.kind === "spot"
-                ? value.kind
-                : "directional",
-            color: typeof value.color === "string" ? value.color : "#fff4d6",
-            intensity:
-              typeof value.intensity === "number" ? value.intensity : 1,
-            range: readNumber(value.range, 1200),
-            angle: readNumber(value.angle, 45),
-            softness: readNumber(value.softness, 0.25),
-            debug: value.debug !== false,
-            showRange: value.showRange !== false,
-            selected: object.id === props.selectedObjectId,
-            target: resolveAuthorLightTarget(
-              evaluated.bounds,
-              transform,
-              value.target,
-            ),
-          };
-        }),
-    );
-  }, [props.part, props.localTime, props.selectedObjectId]);
-
   // Once the CSS3D plane target portal is ready, force one render so the
   // composition is visible on initial mount, not after the next input change.
   useEffect(() => {
@@ -1093,4 +1257,4 @@ export function ComposeAuthorView(props: ComposeAuthorViewProps) {
       ) : null}
     </div>
   );
-}
+});

@@ -461,7 +461,10 @@ function AppContent({
   const frameViewportRef = useRef<HTMLDivElement | null>(null);
   const dragSelectionBoxRef = useRef<HTMLDivElement | null>(null);
   const frameZoomControlRef = useRef<HTMLDivElement | null>(null);
-  const uiPersistRef = useRef({ selectedComposeObjectIds: [] as string[] });
+  const uiPersistRef = useRef<{
+    selectedComposeObjectIds: string[];
+    threeAuthorView?: EditorState["threeAuthorView"];
+  }>({ selectedComposeObjectIds: [] });
   uiPersistRef.current.selectedComposeObjectIds = selectedComposeObjectIds;
   const modeRef = useRef(mode);
   const activePartFilePathRef = useRef("");
@@ -602,6 +605,9 @@ function AppContent({
     timelineModeRef,
     uiPersistRef,
   });
+  useEffect(() => {
+    uiPersistRef.current.threeAuthorView = project.editorState?.threeAuthorView;
+  }, [project.editorState?.threeAuthorView]);
 
   const {
     prerenderBlockDurationMs,
@@ -788,25 +794,28 @@ function AppContent({
     project,
     selectedSceneId,
   );
-  const timelineLayers =
-    hasActiveTimeline || composeMode
-      ? {
-          ...defaultTimelineLayerState,
-          ...storedTimelineLayers,
-          compositionLayers: storedTimelineLayers?.compositionLayers?.length
-            ? storedTimelineLayers.compositionLayers
-            : defaultTimelineLayerState.compositionLayers,
-          adjustmentLayers: storedTimelineLayers?.adjustmentLayers?.length
-            ? storedTimelineLayers.adjustmentLayers
-            : defaultTimelineLayerState.adjustmentLayers,
-          motionLayers: storedTimelineLayers?.motionLayers?.length
-            ? storedTimelineLayers.motionLayers
-            : defaultTimelineLayerState.motionLayers,
-          transitionLayers: storedTimelineLayers?.transitionLayers?.length
-            ? storedTimelineLayers.transitionLayers
-            : defaultTimelineLayerState.transitionLayers,
-        }
-      : emptyTimelineLayerState;
+  const timelineLayers = useMemo(
+    () =>
+      hasActiveTimeline || composeMode
+        ? {
+            ...defaultTimelineLayerState,
+            ...storedTimelineLayers,
+            compositionLayers: storedTimelineLayers?.compositionLayers?.length
+              ? storedTimelineLayers.compositionLayers
+              : defaultTimelineLayerState.compositionLayers,
+            adjustmentLayers: storedTimelineLayers?.adjustmentLayers?.length
+              ? storedTimelineLayers.adjustmentLayers
+              : defaultTimelineLayerState.adjustmentLayers,
+            motionLayers: storedTimelineLayers?.motionLayers?.length
+              ? storedTimelineLayers.motionLayers
+              : defaultTimelineLayerState.motionLayers,
+            transitionLayers: storedTimelineLayers?.transitionLayers?.length
+              ? storedTimelineLayers.transitionLayers
+              : defaultTimelineLayerState.transitionLayers,
+          }
+        : emptyTimelineLayerState,
+    [hasActiveTimeline, composeMode, storedTimelineLayers],
+  );
   const baseMotionLayers = timelineLayers.motionLayers?.length
     ? timelineLayers.motionLayers
     : defaultTimelineLayerState.motionLayers!;
@@ -1791,9 +1800,34 @@ function AppContent({
         | NonNullable<EditorState["threeAuthorView"]>
         | Partial<NonNullable<EditorState["threeAuthorView"]>>,
     ) => {
-      updateEditorState((state) => ({
-        ...state,
-        threeAuthorView: {
+      const orbitOnly =
+        next.orbit !== undefined &&
+        next.previewMode === undefined &&
+        next.sideBySideSplit === undefined;
+      if (orbitOnly) {
+        const current =
+          uiPersistRef.current.threeAuthorView ??
+          projectRef.current.editorState?.threeAuthorView;
+        uiPersistRef.current.threeAuthorView = {
+          previewMode: current?.previewMode ?? "pip",
+          sideBySideSplit: current?.sideBySideSplit ?? 0.5,
+          orbit: {
+            ...(current?.orbit ?? {
+              cameraX: 0,
+              cameraY: 0,
+              cameraZ: 2400,
+              targetX: 0,
+              targetY: 0,
+              targetZ: 0,
+            }),
+            ...next.orbit,
+          },
+        };
+        requestUiPersist();
+        return;
+      }
+      updateEditorState((state) => {
+        const threeAuthorView = {
           ...state.threeAuthorView,
           previewMode:
             next.previewMode ?? state.threeAuthorView?.previewMode ?? "pip",
@@ -1812,10 +1846,15 @@ function AppContent({
             }),
             ...next.orbit,
           },
-        },
-      }));
+        };
+        uiPersistRef.current.threeAuthorView = threeAuthorView;
+        return {
+          ...state,
+          threeAuthorView,
+        };
+      });
     },
-    [updateEditorState],
+    [projectRef, requestUiPersist, updateEditorState],
   );
 
   useComposeToolShortcuts({

@@ -822,6 +822,32 @@ function normalizeCompositionFolderPath(folderPath: string) {
   return normalized === "compositions" ? "" : normalized;
 }
 
+const normalizedSourcesCache = new Map<string, string>();
+function stripCompositionSourcePrerenderMark(source: string) {
+  let normalized = normalizedSourcesCache.get(source);
+  if (normalized === undefined) {
+    normalized = source.replace(/\n\s*prerender:\s*(?:true|false),?/g, "");
+    if (normalizedSourcesCache.size > 1000) {
+      normalizedSourcesCache.clear();
+    }
+    normalizedSourcesCache.set(source, normalized);
+  }
+  return normalized;
+}
+
+const prerenderTestCache = new Map<string, boolean>();
+function hasPrerenderMark(source: string): boolean {
+  let hasMark = prerenderTestCache.get(source);
+  if (hasMark === undefined) {
+    hasMark = /\n\s*prerender:\s*true\s*,?/.test(source);
+    if (prerenderTestCache.size > 1000) {
+      prerenderTestCache.clear();
+    }
+    prerenderTestCache.set(source, hasMark);
+  }
+  return hasMark;
+}
+
 function normalizeCompositionSources(
   sources: Record<string, string> | undefined,
 ) {
@@ -838,10 +864,6 @@ function normalizeCompositionSources(
   );
 }
 
-function stripCompositionSourcePrerenderMark(source: string) {
-  return source.replace(/\n\s*prerender:\s*(?:true|false),?/g, "");
-}
-
 function getLegacyPrerenderCompositionIds(project: ProjectManifest) {
   const sources = project.compositionSources ?? {};
   const marked = new Set<string>();
@@ -850,7 +872,7 @@ function getLegacyPrerenderCompositionIds(project: ProjectManifest) {
     ...(project.compositions ?? []),
   ]) {
     const source = sources[composition.filePath] ?? "";
-    if (composition.prerender || /\n\s*prerender:\s*true\s*,?/.test(source))
+    if (composition.prerender || (source && hasPrerenderMark(source)))
       marked.add(composition.id);
   }
   return marked;

@@ -128,6 +128,14 @@ export function useComposeObjectPreview({
       );
       return;
     }
+    if (next.type === "light") {
+      window.dispatchEvent(
+        new CustomEvent("clipper:light-preview", {
+          detail: { object: next },
+        }),
+      );
+      return;
+    }
     const selector =
       next.id === part.background.id
         ? `[data-layer-id="${cssEscape(next.id)}"]`

@@ -45,8 +45,6 @@ function ThreeDBoundsSection() {
   const {
     object,
     hasAttributeKeyframes,
-    previewBounds,
-    updateBounds,
     onChange,
     onPreview,
     readEffectiveTime,
@@ -83,6 +81,38 @@ function ThreeDBoundsSection() {
     onChange((current) => upsertPropertyKeyframe(current, path, time, value));
   }
 
+  function previewEvaluatedObject(
+    update: (evaluated: FrameObject) => FrameObject,
+  ) {
+    onPreview?.((current) =>
+      update(evaluateObjectState(current, readEffectiveTime()) as FrameObject),
+    );
+  }
+
+  function previewBoundsAt(key: BoundsAnimationKey, value: number) {
+    previewEvaluatedObject((evaluated) => ({
+      ...evaluated,
+      bounds: {
+        ...evaluated.bounds,
+        [key]: Number.isFinite(value) ? value : 0,
+      },
+    }));
+  }
+
+  function commitBoundsAt(key: BoundsAnimationKey, value: number) {
+    if (!Number.isFinite(value)) return;
+    const path = `bounds.${key}` as BoundsPath;
+    if (hasPropertyTrack(object, path)) {
+      const time = readEffectiveTime();
+      onChange((current) => upsertPropertyKeyframe(current, path, time, value));
+      return;
+    }
+    onChange((current) => ({
+      ...current,
+      bounds: { ...current.bounds, [key]: value },
+    }));
+  }
+
   // --- Transform (translateZ / rotateX / rotateY / rotateZ) helpers ---
   function readTransformBase(path: TransformPath): number {
     const transform =
@@ -107,14 +137,14 @@ function ThreeDBoundsSection() {
   }
 
   function previewTransformAt(path: TransformPath, value: number) {
-    onPreview?.((current) => {
+    previewEvaluatedObject((evaluated) => {
       const transform =
-        current.transform && typeof current.transform === "object"
-          ? (current.transform as Record<string, unknown>)
+        evaluated.transform && typeof evaluated.transform === "object"
+          ? (evaluated.transform as Record<string, unknown>)
           : {};
       const key = path.slice("transform.".length);
       return {
-        ...current,
+        ...evaluated,
         transform: { ...transform, [key]: value } as FrameObject["transform"],
       };
     });
@@ -213,8 +243,8 @@ function ThreeDBoundsSection() {
                 isBoundsKeyframedNow(field.key) ||
                 hasAttributeKeyframes(field.key)
               }
-              onPreview={(v) => previewBounds(field.key, v)}
-              onCommit={(v) => updateBounds(field.key, String(v))}
+              onPreview={(v) => previewBoundsAt(field.key, v)}
+              onCommit={(v) => commitBoundsAt(field.key, v)}
               onToggleKeyframe={() => toggleBoundsKeyframe(field.key)}
             />
           ) : (
@@ -263,8 +293,8 @@ function ThreeDBoundsSection() {
                 isBoundsKeyframedNow(field.key) ||
                 hasAttributeKeyframes(field.key)
               }
-              onPreview={(v) => previewBounds(field.key, v)}
-              onCommit={(v) => updateBounds(field.key, String(v))}
+              onPreview={(v) => previewBoundsAt(field.key, v)}
+              onCommit={(v) => commitBoundsAt(field.key, v)}
               onToggleKeyframe={() => toggleBoundsKeyframe(field.key)}
             />
           ))}

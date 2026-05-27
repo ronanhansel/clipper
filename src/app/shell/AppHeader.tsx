@@ -113,16 +113,20 @@ export const AppHeader = memo(function AppHeader({
   );
 });
 
+const savedTimeFormatter = new Intl.DateTimeFormat(undefined, {
+  hour: "numeric",
+  minute: "2-digit",
+});
+
+const savedTitleFormatter = new Intl.DateTimeFormat(undefined, {
+  dateStyle: "medium",
+  timeStyle: "medium",
+});
+
 function formatSavedTime(timestamp: number) {
-  return new Intl.DateTimeFormat(undefined, {
-    hour: "numeric",
-    minute: "2-digit",
-  }).format(new Date(timestamp));
+  return savedTimeFormatter.format(new Date(timestamp));
 }
 
 function formatSavedTitle(timestamp: number) {
-  return new Intl.DateTimeFormat(undefined, {
-    dateStyle: "medium",
-    timeStyle: "medium",
-  }).format(new Date(timestamp));
+  return savedTitleFormatter.format(new Date(timestamp));
 }

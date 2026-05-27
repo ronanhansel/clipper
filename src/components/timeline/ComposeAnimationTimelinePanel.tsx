@@ -2656,7 +2656,9 @@ function areComposeAnimationTimelinePanelPropsEqual(
   previous: ComposeAnimationTimelinePanelProps,
   next: ComposeAnimationTimelinePanelProps,
 ) {
-  if (!next.scrubbingRef.current) return false;
+  if (!next.scrubbingRef.current && previous.currentTime !== next.currentTime) {
+    return false;
+  }
   return (
     previous.part === next.part &&
     previous.isPlaying === next.isPlaying &&

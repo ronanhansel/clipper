@@ -223,6 +223,16 @@ export function ColorSelector({
     onChange(formatGradientValue(next));
   }
 
+  function openPicker() {
+    if (!open) togglePicker();
+  }
+
+  function handleTriggerKeyDown(event: React.KeyboardEvent<HTMLDivElement>) {
+    if (event.key !== "Enter" && event.key !== " ") return;
+    event.preventDefault();
+    openPicker();
+  }
+
   async function pickFromScreen() {
     const EyeDropper = (
       window as unknown as {
@@ -313,17 +323,18 @@ export function ColorSelector({
 
   return (
     <div ref={rootRef} className="relative w-full">
-      <button
+      <div
+        role="button"
+        tabIndex={0}
         className={
           isCompact
-            ? "flex h-6 w-full min-w-0 items-center justify-between gap-1.5 rounded border border-[#2d313b] bg-[#0c121b] px-1.5 pr-7 text-[11px] font-bold text-[#dfe2ea] transition hover:border-[var(--clipper-accent)]"
+            ? "flex h-6 w-full min-w-0 cursor-pointer items-center justify-between gap-1.5 rounded border border-[#2d313b] bg-[#0c121b] px-1.5 pr-7 text-[11px] font-bold text-[#dfe2ea] transition hover:border-[var(--clipper-accent)] focus:outline-none focus:ring-1 focus:ring-[var(--clipper-accent)]"
             : isDense
-              ? `flex h-8 w-full items-center justify-between gap-2 rounded-[8px] border border-[#2d313b] bg-[#171920] px-2 text-xs font-bold text-[#dfe2ea] transition hover:border-[var(--clipper-accent)]`
-              : `flex h-[42px] w-full items-center justify-between gap-2 rounded-[10px] border border-[#2d313b] bg-[#171920] text-xs font-bold text-[#dfe2ea] transition hover:border-[var(--clipper-accent)] ${leftSlot ? "pl-2 pr-3" : "px-3"}`
+              ? `flex h-8 w-full cursor-pointer items-center justify-between gap-2 rounded-[8px] border border-[#2d313b] bg-[#171920] px-2 text-xs font-bold text-[#dfe2ea] transition hover:border-[var(--clipper-accent)] focus:outline-none focus:ring-1 focus:ring-[var(--clipper-accent)]`
+              : `flex h-[42px] w-full cursor-pointer items-center justify-between gap-2 rounded-[10px] border border-[#2d313b] bg-[#171920] text-xs font-bold text-[#dfe2ea] transition hover:border-[var(--clipper-accent)] focus:outline-none focus:ring-1 focus:ring-[var(--clipper-accent)] ${leftSlot ? "pl-2 pr-3" : "px-3"}`
         }
-        onClick={() => {
-          if (!open) togglePicker();
-        }}
+        onClick={openPicker}
+        onKeyDown={handleTriggerKeyDown}
       >
         {leftSlot ? (
           <span className="mr-1 flex shrink-0 items-center">{leftSlot}</span>
@@ -393,7 +404,7 @@ export function ColorSelector({
             </span>
           )}
         </span>
-      </button>
+      </div>
       {pickerPanel ? createPortal(pickerPanel, document.body) : null}
     </div>
   );
@@ -537,6 +548,16 @@ export function FillColorSelector({
     commitFill(draftRef.current);
   }
 
+  function openPicker() {
+    if (!open) togglePicker();
+  }
+
+  function handleTriggerKeyDown(event: React.KeyboardEvent<HTMLDivElement>) {
+    if (event.key !== "Enter" && event.key !== " ") return;
+    event.preventDefault();
+    openPicker();
+  }
+
   async function handlePickFromScreen() {
     const EyeDropper = (
       window as unknown as {
@@ -626,15 +647,16 @@ export function FillColorSelector({
 
   return (
     <div ref={rootRef} className="relative w-full">
-      <button
+      <div
+        role="button"
+        tabIndex={0}
         className={
           isCompact
-            ? "flex h-6 w-full min-w-0 items-center justify-between gap-1.5 rounded border border-[#2d313b] bg-[#0c121b] px-1.5 pr-7 text-[11px] font-bold text-[#dfe2ea] transition hover:border-[var(--clipper-accent)]"
-            : `flex h-[42px] w-full items-center justify-between gap-2 rounded-[10px] border border-[#2d313b] bg-[#171920] text-xs font-bold text-[#dfe2ea] transition hover:border-[var(--clipper-accent)] ${leftSlot ? "pl-2 pr-3" : "px-3"}`
+            ? "flex h-6 w-full min-w-0 cursor-pointer items-center justify-between gap-1.5 rounded border border-[#2d313b] bg-[#0c121b] px-1.5 pr-7 text-[11px] font-bold text-[#dfe2ea] transition hover:border-[var(--clipper-accent)] focus:outline-none focus:ring-1 focus:ring-[var(--clipper-accent)]"
+            : `flex h-[42px] w-full cursor-pointer items-center justify-between gap-2 rounded-[10px] border border-[#2d313b] bg-[#171920] text-xs font-bold text-[#dfe2ea] transition hover:border-[var(--clipper-accent)] focus:outline-none focus:ring-1 focus:ring-[var(--clipper-accent)] ${leftSlot ? "pl-2 pr-3" : "px-3"}`
         }
-        onClick={() => {
-          if (!open) togglePicker();
-        }}
+        onClick={openPicker}
+        onKeyDown={handleTriggerKeyDown}
       >
         {leftSlot ? (
           <span className="mr-1 flex shrink-0 items-center">{leftSlot}</span>
@@ -660,7 +682,7 @@ export function FillColorSelector({
               : `${draft.gradientType} gradient`}
           </span>
         </span>
-      </button>
+      </div>
       {pickerPanel ? createPortal(pickerPanel, document.body) : null}
     </div>
   );
