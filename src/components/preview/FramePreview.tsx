@@ -2793,6 +2793,7 @@ export const FrameObjectView = memo(function FrameObjectView({
   focusPicking,
   frameScale,
   isPlaying,
+  liveCodeObjectTime,
   previewTime,
   liveTimeOffset,
   renderMode,
@@ -2816,6 +2817,7 @@ export const FrameObjectView = memo(function FrameObjectView({
   focusPicking: boolean;
   frameScale: number;
   isPlaying: boolean;
+  liveCodeObjectTime?: boolean;
   previewTime: number;
   liveTimeOffset?: number;
   renderMode: "preview" | "export";
@@ -3143,6 +3145,10 @@ export const FrameObjectView = memo(function FrameObjectView({
 
   const isLocked = Boolean(object.locked);
   const isNullObject = object.type === "null";
+  const codeObjectTime =
+    liveTimeOffset !== undefined || liveCodeObjectTime === false
+      ? previewTime
+      : undefined;
 
   if (isNullObject && renderMode === "export") return null;
 
@@ -3254,7 +3260,12 @@ export const FrameObjectView = memo(function FrameObjectView({
         <Pattern2DContent object={evaluatedObject} />
       ) : null}
       {object.type === "code" ? (
-        <CodeObjectFrame object={evaluatedObject} />
+        <CodeObjectFrame
+          liveTimeEnabled={liveCodeObjectTime ?? true}
+          liveTimeOffset={liveTimeOffset ?? 0}
+          object={evaluatedObject}
+          time={codeObjectTime}
+        />
       ) : null}
       {object.type === "composition" ? (
         <SubcompositionContent
@@ -4407,6 +4418,58 @@ function clearSelectionPreviewBounds(element: HTMLElement) {
   element.style.removeProperty("--clipper-selection-preview-height");
 }
 
+function findPortalSelectionTargetElement(
+  frameViewport: HTMLElement,
+  objectId: string,
+) {
+  const objectRoot =
+    frameViewport.querySelector<HTMLElement>("[data-clipper-flat-frame]") ??
+    frameViewport;
+  const objectCandidates = Array.from(
+    objectRoot.querySelectorAll<HTMLElement>(
+      `[data-clipper-render-object-id="${cssEscape(objectId)}"],[data-background-element-id="${cssEscape(objectId)}"]`,
+    ),
+  );
+  const rootRect = objectRoot.getBoundingClientRect();
+  return (
+    objectCandidates.find((candidate) => {
+      const rect = candidate.getBoundingClientRect();
+      return (
+        rect.right >= rootRect.left &&
+        rect.left <= rootRect.right &&
+        rect.bottom >= rootRect.top &&
+        rect.top <= rootRect.bottom
+      );
+    }) ??
+    objectCandidates[0] ??
+    null
+  );
+}
+
+function setSelectionPreviewBoundsFromTargetRect(
+  element: HTMLElement,
+  targetRect: DOMRect,
+  hostRect: DOMRect,
+  insetPx: number,
+) {
+  element.style.setProperty(
+    "--clipper-selection-preview-left",
+    `${targetRect.left - hostRect.left - insetPx}px`,
+  );
+  element.style.setProperty(
+    "--clipper-selection-preview-top",
+    `${targetRect.top - hostRect.top - insetPx}px`,
+  );
+  element.style.setProperty(
+    "--clipper-selection-preview-width",
+    `${targetRect.width + insetPx * 2}px`,
+  );
+  element.style.setProperty(
+    "--clipper-selection-preview-height",
+    `${targetRect.height + insetPx * 2}px`,
+  );
+}
+
 export function SelectionOverlayBox({
   objectId,
   bounds,
@@ -4640,6 +4703,20 @@ export function SelectionOverlayBox({
         -offsetPx,
       );
       if (portal && portalHost && frameViewportRef?.current) {
+        if (element.dataset.clipperDragPreviewActive === "true") return;
+        const targetElement = findPortalSelectionTargetElement(
+          frameViewportRef.current,
+          objectId,
+        );
+        if (targetElement) {
+          setSelectionPreviewBoundsFromTargetRect(
+            element,
+            targetElement.getBoundingClientRect(),
+            portalHost.getBoundingClientRect(),
+            offsetPx,
+          );
+          return;
+        }
         const portalBounds = viewportBoundsToPortal(
           nextViewportBounds,
           getFramePortalOverlayTransform(
@@ -4726,25 +4803,11 @@ export function SelectionOverlayBox({
     const element = boxRef.current;
     const frameViewport = frameViewportRef?.current;
     if (!element || !frameViewport || !portal || !portalHost) return;
-    const objectRoot =
-      frameViewport.querySelector<HTMLElement>("[data-clipper-flat-frame]") ??
-      frameViewport;
-    const objectCandidates = Array.from(
-      objectRoot.querySelectorAll<HTMLElement>(
-        `[data-clipper-render-object-id="${cssEscape(objectId)}"],[data-background-element-id="${cssEscape(objectId)}"]`,
-      ),
+    if (element.dataset.clipperDragPreviewActive === "true") return;
+    const objectElement = findPortalSelectionTargetElement(
+      frameViewport,
+      objectId,
     );
-    const rootRect = objectRoot.getBoundingClientRect();
-    const objectElement =
-      objectCandidates.find((candidate) => {
-        const rect = candidate.getBoundingClientRect();
-        return (
-          rect.right >= rootRect.left &&
-          rect.left <= rootRect.right &&
-          rect.bottom >= rootRect.top &&
-          rect.top <= rootRect.bottom
-        );
-      }) ?? objectCandidates[0];
     if (objectElement) {
       syncTargetRectToPortalElement(
         element,

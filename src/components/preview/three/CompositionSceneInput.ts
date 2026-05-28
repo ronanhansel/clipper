@@ -7,6 +7,7 @@ import {
   type CompositionClip,
 } from "../../../core/types";
 import { applyCompositionCameraToThree } from "./compositionCameraThree";
+import { getCameraObjectPropsSignature } from "./cameraObjectSignature";
 import { LayerNodeSync } from "./layers/LayerNodeSync";
 import {
   LayerShadowSync,
@@ -21,6 +22,9 @@ export type CompositionSceneInputOptions = {
   requestRender: () => void;
 };
 
+const FAR_PLANE_CLIP_OFFSET = 1;
+const FAR_PLANE_OVERSCAN = 1.1;
+
 export class CompositionSceneInput {
   readonly scene: InstanceType<typeof THREE.Scene>;
   readonly camera: InstanceType<typeof THREE.PerspectiveCamera>;
@@ -33,6 +37,7 @@ export class CompositionSceneInput {
   private readonly backgroundMesh: InstanceType<typeof THREE.Mesh>;
   private sourceElement: Element | null = null;
   private compositionCamera: CameraObjectProps | null = null;
+  private compositionCameraSignature = "";
   private lastComposition: {
     part: CompositionClip | null;
     localTime: number;
@@ -50,7 +55,6 @@ export class CompositionSceneInput {
       DEFAULT_CAMERA_OBJECT_PROPS.near,
       DEFAULT_CAMERA_OBJECT_PROPS.far,
     );
-    this.applyCamera(DEFAULT_CAMERA_OBJECT_PROPS);
 
     this.sharedCapture = new SharedCaptureCanvas(FRAME_WIDTH, FRAME_HEIGHT);
     this.layerSync = new LayerNodeSync({
@@ -62,10 +66,8 @@ export class CompositionSceneInput {
     this.scene.add(this.layerSync.group);
     this.shadowSync = new LayerShadowSync({ backend: "webgpu-node" });
 
-    const backgroundDistance =
-      DEFAULT_CAMERA_OBJECT_PROPS.far - DEFAULT_CAMERA_OBJECT_PROPS.near;
     this.backgroundMesh = new THREE.Mesh(
-      new THREE.PlaneGeometry(backgroundDistance * 4, backgroundDistance * 4),
+      new THREE.PlaneGeometry(1, 1),
       new THREE.MeshBasicMaterial({
         color: 0x000000,
         depthWrite: true,
@@ -75,13 +77,9 @@ export class CompositionSceneInput {
       }),
     );
     this.backgroundMesh.name = "CompositionFarPlane";
-    this.backgroundMesh.position.set(
-      0,
-      0,
-      -(DEFAULT_CAMERA_OBJECT_PROPS.far - 1),
-    );
     this.backgroundMesh.renderOrder = -1000;
     this.scene.add(this.backgroundMesh);
+    this.applyCamera(DEFAULT_CAMERA_OBJECT_PROPS);
   }
 
   get captureCanvas(): HTMLCanvasElement {
@@ -93,12 +91,39 @@ export class CompositionSceneInput {
   }
 
   applyCamera(camera: CameraObjectProps | null) {
+    const signature = getCameraObjectPropsSignature(camera);
+    if (signature === this.compositionCameraSignature) return;
+    this.compositionCameraSignature = signature;
     this.compositionCamera = camera;
     applyCompositionCameraToThree(
       this.camera,
       camera,
       this.width / this.height,
     );
+    this.syncBackgroundMeshToCamera();
+  }
+
+  syncBackgroundMeshToCamera() {
+    const distance = Math.max(
+      this.camera.near,
+      this.camera.far - FAR_PLANE_CLIP_OFFSET,
+    );
+    const forward = new THREE.Vector3(0, 0, -1).applyQuaternion(
+      this.camera.quaternion,
+    );
+    this.backgroundMesh.position
+      .copy(this.camera.position)
+      .addScaledVector(forward, distance);
+    this.backgroundMesh.quaternion.copy(this.camera.quaternion);
+
+    const height =
+      2 * Math.tan(THREE.MathUtils.degToRad(this.camera.fov) * 0.5) * distance;
+    this.backgroundMesh.scale.set(
+      height * this.camera.aspect * FAR_PLANE_OVERSCAN,
+      height * FAR_PLANE_OVERSCAN,
+      1,
+    );
+    this.backgroundMesh.updateMatrixWorld(true);
   }
 
   syncComposition(

@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 import * as THREE from "three";
-import { LayerShadowSync } from "./LayerShadowSync";
+import {
+  hasTimeVaryingObjectState,
+  LayerShadowSync,
+  readShadowSignatureObjectState,
+} from "./LayerShadowSync";
 import {
   FRAME_HEIGHT,
   FRAME_WIDTH,
@@ -101,6 +105,38 @@ function makeRectMesh(
 }
 
 describe("LayerShadowSync", () => {
+  it("reads static shadow signature state without evaluating tracks", () => {
+    const object = makeObject("rect-1", {
+      x: 1,
+      y: 2,
+      width: 10,
+      height: 20,
+    });
+    object.props = { castShadow: true };
+    object.style = { opacity: 0.5 };
+    object.transform = { translateZ: 12 };
+
+    const state = readShadowSignatureObjectState(object, 1);
+
+    expect(hasTimeVaryingObjectState(object)).toBe(false);
+    expect(state.bounds).toBe(object.bounds);
+    expect(state.props).toBe(object.props);
+    expect(state.style).toBe(object.style);
+    expect(state.transform).toBe(object.transform);
+  });
+
+  it("detects tracked shadow inputs as time-varying", () => {
+    const object = makeObject("rect-1", {
+      x: 1,
+      y: 2,
+      width: 10,
+      height: 20,
+    });
+    object.tracks = { "bounds.x": [] } as unknown as FrameObject["tracks"];
+
+    expect(hasTimeVaryingObjectState(object)).toBe(true);
+  });
+
   it("keeps per-caster rounded rect uniforms during the shadow pass", () => {
     const sync = new LayerShadowSync();
     const layerRoot = new THREE.Group();
@@ -431,10 +467,12 @@ describe("LayerShadowSync", () => {
       makeObject("rect-1", { x: 0, y: 0, width: 10, height: 20 }),
     ]);
     sync.sync(part, 0, renderer, layerRoot);
+    const firstObjects = sync.getDiagnostics().objects;
     sync.sync(part, 1, renderer, layerRoot);
 
     // Each shadow map render produces 2 renderer.render calls (main + debug target).
     expect(renderCount).toBe(2);
+    expect(sync.getDiagnostics().objects).toBe(firstObjects);
 
     sync.sync(
       makePart([
@@ -447,6 +485,91 @@ describe("LayerShadowSync", () => {
     );
 
     expect(renderCount).toBe(4);
+    expect(sync.getDiagnostics().objects).not.toBe(firstObjects);
+    sync.dispose();
+  });
+
+  it("skips shadow input traversal for reusable static native casters", () => {
+    const sync = new LayerShadowSync();
+    const layerRoot = new THREE.Group();
+    layerRoot.add(makeRectMesh("rect-1", new THREE.Vector2(10, 20)));
+    const originalTraverse = layerRoot.traverse.bind(layerRoot);
+    let traverseCount = 0;
+    layerRoot.traverse = ((
+      callback: Parameters<typeof layerRoot.traverse>[0],
+    ) => {
+      traverseCount += 1;
+      originalTraverse(callback);
+    }) as typeof layerRoot.traverse;
+
+    const renderer = {
+      getRenderTarget: () => null,
+      getClearColor: () => {},
+      getClearAlpha: () => 1,
+      setRenderTarget: () => {},
+      setClearColor: () => {},
+      clear: () => {},
+      render: () => {},
+    };
+
+    const part = makePart([
+      makeLight(),
+      makeObject("rect-1", { x: 0, y: 0, width: 10, height: 20 }),
+    ]);
+
+    sync.sync(part, 0, renderer, layerRoot);
+    const firstTraverseCount = traverseCount;
+    sync.sync(part, 1, renderer, layerRoot);
+
+    expect(traverseCount).toBe(firstTraverseCount);
+    sync.dispose();
+  });
+
+  it("keeps traversing shadow inputs for texture casters", () => {
+    const sync = new LayerShadowSync();
+    const layerRoot = new THREE.Group();
+    const material = new THREE.MeshBasicMaterial();
+    material.userData.layerShadowUniforms = {
+      u_image: { value: new THREE.Texture() },
+      u_uvOrigin: { value: new THREE.Vector2(0, 0) },
+      u_uvSize: { value: new THREE.Vector2(1, 1) },
+      u_opacity: { value: 1 },
+    };
+    const mesh = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), material);
+    mesh.userData.frameObjectId = "image-1";
+    layerRoot.add(mesh);
+    const originalTraverse = layerRoot.traverse.bind(layerRoot);
+    let traverseCount = 0;
+    layerRoot.traverse = ((
+      callback: Parameters<typeof layerRoot.traverse>[0],
+    ) => {
+      traverseCount += 1;
+      originalTraverse(callback);
+    }) as typeof layerRoot.traverse;
+
+    const renderer = {
+      getRenderTarget: () => null,
+      getClearColor: () => {},
+      getClearAlpha: () => 1,
+      setRenderTarget: () => {},
+      setClearColor: () => {},
+      clear: () => {},
+      render: () => {},
+    };
+
+    const part = makePart([
+      makeLight(),
+      {
+        ...makeObject("image-1", { x: 0, y: 0, width: 10, height: 20 }),
+        type: "image",
+      },
+    ]);
+
+    sync.sync(part, 0, renderer, layerRoot);
+    const firstTraverseCount = traverseCount;
+    sync.sync(part, 1, renderer, layerRoot);
+
+    expect(traverseCount).toBeGreaterThan(firstTraverseCount);
     sync.dispose();
   });
 });

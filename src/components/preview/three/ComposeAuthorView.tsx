@@ -22,7 +22,6 @@ import {
   findActiveCameraObject,
   getActiveCameraObjectProps,
 } from "../compositors/useCompositionCamera";
-import { evaluateObjectState } from "../../../core/propertyRegistry";
 import {
   FRAME_HEIGHT,
   FRAME_WIDTH,
@@ -41,6 +40,10 @@ import type { CameraPathHandle } from "./cameraPathOverlay";
 import type { CompositionBackendProps } from "../backends/CompositionBackend";
 import { resolveLightTargetFromTransform } from "./lightObjectTransform";
 import { useOptionalPreviewRenderScheduler } from "../scheduler/PreviewRenderSchedulerContext";
+import {
+  hasTimeVaryingObjectState,
+  readPreviewObjectState,
+} from "./readPreviewObjectState";
 
 export type CameraPreviewMode = "pip" | "side-by-side" | "2d";
 export type ComposeAuthorViewState = {
@@ -176,11 +179,22 @@ function buildAuthorLightObject(
   localTime: number,
   selectedObjectId: string | null,
 ): ThreeAuthorLightObject {
-  const evaluated = evaluateObjectState(object, localTime);
+  const evaluated = readAuthorObjectState(object, localTime);
   return buildAuthorLightObjectFromState(
     evaluated as FrameObject,
     selectedObjectId,
   );
+}
+
+export function hasTimeVaryingAuthorObjectState(object: FrameObject): boolean {
+  return hasTimeVaryingObjectState(object);
+}
+
+export function readAuthorObjectState(
+  object: FrameObject,
+  localTime: number,
+): FrameObject {
+  return readPreviewObjectState(object, localTime) as FrameObject;
 }
 
 function buildAuthorLightObjectFromState(
@@ -237,7 +251,7 @@ function buildAuthorPickableObjects(
       (object) => object.type !== "camera" && !object.hidden && object.threeD,
     )
     .map((object) => {
-      const state = evaluateObjectState(object, localTime);
+      const state = readAuthorObjectState(object, localTime);
       return buildAuthorPickableObjectFromState(state as FrameObject);
     });
 }
@@ -265,7 +279,7 @@ function buildAuthorPickableObjectsWithPreview(
       object.id === previewObject.id
         ? buildAuthorPickableObjectFromState(previewObject)
         : buildAuthorPickableObjectFromState(
-            evaluateObjectState(object, localTime) as FrameObject,
+            readAuthorObjectState(object, localTime) as FrameObject,
           ),
     );
 }
@@ -313,7 +327,7 @@ function syncAuthorSceneAtTime(
     scene.setSelectedObject(null, null, null);
     return;
   }
-  const evaluated = evaluateObjectState(selectedObject, localTime);
+  const evaluated = readAuthorObjectState(selectedObject, localTime);
   scene.setSelectedObject(
     selectedObject.id,
     evaluated.bounds,
@@ -1007,7 +1021,7 @@ export const ComposeAuthorView = memo(function ComposeAuthorView(
           props.part.objects
             .filter((item) => item.type === "light" && !item.hidden)
             .map((item) => {
-              const evaluated = evaluateObjectState(item, props.localTime);
+              const evaluated = readPreviewObjectState(item, props.localTime);
               const transform =
                 evaluated.transform && typeof evaluated.transform === "object"
                   ? { ...evaluated.transform }
@@ -1080,7 +1094,7 @@ export const ComposeAuthorView = memo(function ComposeAuthorView(
         `[data-clipper-render-object-id="${cssEscape(objectId)}"]`,
       );
       if (!target) return;
-      const evaluated = evaluateObjectState(object, props.localTime);
+      const evaluated = readPreviewObjectState(object, props.localTime);
       const transform =
         evaluated.transform && typeof evaluated.transform === "object"
           ? { ...evaluated.transform }

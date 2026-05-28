@@ -23,22 +23,10 @@ import {
   RectIcon,
   StarIcon,
 } from "../../components/ShapeIcons";
-import type { ComposeCursorTool } from "../features/compose/composeDrawing";
-
-export type ComposeDrawTool =
-  | "rect"
-  | "line"
-  | "arrow"
-  | "ellipse"
-  | "polygon"
-  | "star"
-  | "pen"
-  | "pencil"
-  | "text"
-  | "textPath"
-  | "pattern2d"
-  | "null"
-  | "code";
+import type {
+  ComposeCursorTool,
+  ComposeDrawTool,
+} from "../features/compose/composeDrawing";
 
 export type ComposeToolbarProps = {
   activeTool: ComposeDrawTool | null;
@@ -47,6 +35,8 @@ export type ComposeToolbarProps = {
   onAddMediaObject: () => void;
   onAddCodeObject: () => void;
   onAddSubcomposition: () => void;
+  onAddDrawObject: (tool: ComposeDrawTool) => void;
+  insertDrawToolsImmediately: boolean;
   onActiveToolChange: (tool: ComposeDrawTool | null) => void;
   activeCursorTool: ComposeCursorTool;
   onCursorToolChange: (tool: ComposeCursorTool) => void;
@@ -207,6 +197,8 @@ export function ComposeToolbar({
   onAddMediaObject,
   onAddCodeObject,
   onAddSubcomposition,
+  onAddDrawObject,
+  insertDrawToolsImmediately,
   onActiveToolChange,
   activeCursorTool,
   onCursorToolChange,
@@ -254,6 +246,11 @@ export function ComposeToolbar({
       setLastPenTool(tool.tool);
     if (textTools.some((item) => item.tool === tool.tool))
       setLastTextTool(tool.tool);
+    if (insertDrawToolsImmediately) {
+      onAddDrawObject(tool.tool);
+      setOpenMenu(null);
+      return;
+    }
     onActiveToolChange(tool.tool);
     setOpenMenu(null);
   }
@@ -277,6 +274,11 @@ export function ComposeToolbar({
   function invokeGeneratorTool(tool: GeneratorTool) {
     setLastGeneratorTool(tool.key);
     if (tool.key === "pattern2d") {
+      if (insertDrawToolsImmediately) {
+        onAddDrawObject("pattern2d");
+        setOpenMenu(null);
+        return;
+      }
       selectTool({
         tool: "pattern2d",
         label: "2D pattern",

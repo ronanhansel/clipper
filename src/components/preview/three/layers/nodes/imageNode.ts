@@ -494,6 +494,13 @@ class ImageNode implements LayerNode {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   private readonly placeholder: any;
   private currentSrc: string | null = null;
+  private currentRawSrc: unknown = undefined;
+  private currentNormalizedSrc: string | null = null;
+  private currentMediaKindSrc: string | null = null;
+  private currentMediaKind: { video: boolean; svg: boolean } = {
+    video: false,
+    svg: false,
+  };
   private currentTextureKey: string | null = null;
   private currentTextureKind: TextureKind | null = null;
   private currentTextureLayerSized = false;
@@ -543,21 +550,22 @@ class ImageNode implements LayerNode {
     this.mesh.rotation.z = t.rotationZ;
     this.mesh.scale.set(t.scaleX, t.scaleY, 1);
 
-    const src = readImageSrc(state);
+    const src = this.readCachedImageSrc(state);
+    const sourceKind = src ? this.readCachedMediaKind(src) : null;
     const textureKey =
-      src && !isVideoMediaSource(src) && isSvgMediaSource(src)
+      src && !sourceKind?.video && sourceKind?.svg
         ? `svg:${Math.max(1, Math.ceil(t.width))}x${Math.max(1, Math.ceil(t.height))}:${src}`
         : src;
     if (src !== this.currentSrc || textureKey !== this.currentTextureKey) {
       this.releaseCurrentTexture();
       if (src) {
-        if (isVideoMediaSource(src)) {
+        if (sourceKind?.video) {
           this.currentTexture = createVideoFrameTexture();
           this.currentTextureKey = src;
           this.currentTextureKind = "video";
           this.currentTextureLayerSized = false;
           void this.loadVideoFrameProvider(src);
-        } else if (isSvgMediaSource(src)) {
+        } else if (sourceKind?.svg) {
           const lease = acquireLayerSizedSvgTexture(
             src,
             t.width,
@@ -644,6 +652,9 @@ class ImageNode implements LayerNode {
   dispose(): void {
     this.releaseCurrentTexture();
     this.currentSrc = null;
+    this.currentRawSrc = undefined;
+    this.currentNormalizedSrc = null;
+    this.currentMediaKindSrc = null;
     this.currentTextureKey = null;
     this.currentTextureKind = null;
     this.currentTexture = null;
@@ -652,6 +663,24 @@ class ImageNode implements LayerNode {
     this.mesh.geometry.dispose();
     this.material.dispose();
     releaseImageTexture(MEDIA_PLACEHOLDER_DATA_URL);
+  }
+
+  private readCachedImageSrc(state: EvaluatedObjectState): string | null {
+    const rawSrc = state.style?.src;
+    if (rawSrc === this.currentRawSrc) return this.currentNormalizedSrc;
+    this.currentRawSrc = rawSrc;
+    this.currentNormalizedSrc = readImageSrc(state);
+    return this.currentNormalizedSrc;
+  }
+
+  private readCachedMediaKind(src: string): { video: boolean; svg: boolean } {
+    if (src === this.currentMediaKindSrc) return this.currentMediaKind;
+    this.currentMediaKindSrc = src;
+    this.currentMediaKind = {
+      video: isVideoMediaSource(src),
+      svg: isSvgMediaSource(src),
+    };
+    return this.currentMediaKind;
   }
 
   private releaseCurrentTexture(): void {
@@ -701,14 +730,7 @@ class ImageNode implements LayerNode {
   }
 
   private setCurrentMaterialTexture(texture: unknown): void {
-    if (this.context.materialBackend !== "webgpu-node") {
-      setImageMaterialTexture(this.material, texture);
-      return;
-    }
-    const previous = this.material;
-    this.material = createImageNodeMaterial(texture);
-    this.mesh.material = this.material;
-    previous.dispose();
+    setImageMaterialTexture(this.material, texture);
   }
 }
 

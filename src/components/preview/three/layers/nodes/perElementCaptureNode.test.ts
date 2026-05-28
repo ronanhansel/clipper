@@ -33,6 +33,9 @@ class FakeCanvas {
   appendChild(child: FakeCanvas | FakeElement): void {
     this.children.push(child);
   }
+  get childElementCount(): number {
+    return this.children.length;
+  }
   remove(): void {}
   cloneNode(_deep?: boolean): FakeCanvas {
     const clone = new FakeCanvas();
@@ -109,6 +112,44 @@ const fakeDocument = {
     return new FakeElement();
   },
 };
+
+function installFakeResizeObserver(): {
+  observers: Array<{
+    callback: ResizeObserverCallback;
+    disconnect: ReturnType<typeof vi.fn>;
+    observe: ReturnType<typeof vi.fn>;
+    unobserve: ReturnType<typeof vi.fn>;
+  }>;
+  restore: () => void;
+} {
+  const originalResizeObserver = (
+    globalThis as { ResizeObserver?: typeof ResizeObserver }
+  ).ResizeObserver;
+  const observers: Array<{
+    callback: ResizeObserverCallback;
+    disconnect: ReturnType<typeof vi.fn>;
+    observe: ReturnType<typeof vi.fn>;
+    unobserve: ReturnType<typeof vi.fn>;
+  }> = [];
+  class FakeResizeObserver {
+    disconnect = vi.fn();
+    observe = vi.fn();
+    unobserve = vi.fn();
+    constructor(readonly callback: ResizeObserverCallback) {
+      observers.push(this);
+    }
+  }
+  (globalThis as { ResizeObserver?: typeof ResizeObserver }).ResizeObserver =
+    FakeResizeObserver as unknown as typeof ResizeObserver;
+  return {
+    observers,
+    restore: () => {
+      (
+        globalThis as { ResizeObserver?: typeof ResizeObserver }
+      ).ResizeObserver = originalResizeObserver;
+    },
+  };
+}
 
 let originalDocument: unknown;
 beforeAll(() => {
@@ -258,7 +299,7 @@ describe("perElementCaptureNode", () => {
     node.update(makeState({ bounds: { x: 0, y: 0, width: 50, height: 25 } }));
     const material = node.object3D.material;
     const secondTexture = material.userData.layerTextureNode.value;
-    expect(material).not.toBe(firstMaterial);
+    expect(material).toBe(firstMaterial);
     expect(secondTexture).toBeInstanceOf(THREE.CanvasTexture);
     expect(secondTexture).not.toBe(firstTexture);
     expect(material.userData.layerLightingUniforms.u_image.value).toBe(
@@ -290,7 +331,7 @@ describe("perElementCaptureNode", () => {
     const material = node.object3D.material;
     const nextTexture = material.userData.layerTextureNode.value;
     expect(drawElementImage).toHaveBeenCalledTimes(1);
-    expect(material).not.toBe(firstMaterial);
+    expect(material).toBe(firstMaterial);
     expect(nextTexture).toBeInstanceOf(THREE.CanvasTexture);
     expect(nextTexture).not.toBe(firstTexture);
     expect(material.userData.layerLightingUniforms.u_image.value).toBe(
@@ -365,6 +406,83 @@ describe("perElementCaptureNode", () => {
     );
     expect(node.object3D.geometry.parameters.width).toBe(280);
     expect(node.object3D.geometry.parameters.height).toBe(230);
+    node.dispose();
+  });
+
+  it("reuses text overflow padding for unchanged text state", () => {
+    const sharedCapture = makeFakeSharedCapture();
+    const root = new FakeElement();
+    const layer = new FakeElement();
+    layer.setAttribute("data-clipper-render-object-id", "layer-1");
+    root.appendChild(layer);
+    const factory = createPerElementCaptureFactory("text");
+    const node = factory.create({ id: "layer-1" } as FrameObject, {
+      sharedCapture:
+        sharedCapture as unknown as LayerNodeContext["sharedCapture"],
+      sourceRoot: () => root as unknown as Element,
+      requestRender: () => {},
+    });
+    const state = makeState({
+      bounds: { x: 0, y: 0, width: 100, height: 50 },
+      content: "This text overflows",
+      style: { fontSize: 24 },
+    });
+
+    node.update(state);
+    const measureText = getNodeCaptureContext(sharedCapture)
+      .measureText as ReturnType<typeof vi.fn>;
+    const firstCallCount = measureText.mock.calls.length;
+    node.update(state);
+    node.update(makeState({ ...state }));
+
+    expect(firstCallCount).toBeGreaterThan(0);
+    expect(measureText).toHaveBeenCalledTimes(firstCallCount);
+    node.dispose();
+  });
+
+  it("invalidates text overflow padding when text metrics change", () => {
+    const sharedCapture = makeFakeSharedCapture();
+    const root = new FakeElement();
+    const layer = new FakeElement();
+    layer.setAttribute("data-clipper-render-object-id", "layer-1");
+    root.appendChild(layer);
+    const factory = createPerElementCaptureFactory("text");
+    const node = factory.create({ id: "layer-1" } as FrameObject, {
+      sharedCapture:
+        sharedCapture as unknown as LayerNodeContext["sharedCapture"],
+      sourceRoot: () => root as unknown as Element,
+      requestRender: () => {},
+    });
+
+    node.update(
+      makeState({
+        bounds: { x: 0, y: 0, width: 100, height: 50 },
+        content: "This text overflows",
+        style: { fontSize: 24 },
+      }),
+    );
+    const measureText = getNodeCaptureContext(sharedCapture)
+      .measureText as ReturnType<typeof vi.fn>;
+    measureText.mockClear();
+
+    node.update(
+      makeState({
+        bounds: { x: 0, y: 0, width: 100, height: 50 },
+        content: "This text overflows more",
+        style: { fontSize: 24 },
+      }),
+    );
+    expect(measureText).toHaveBeenCalledTimes(1);
+    measureText.mockClear();
+
+    node.update(
+      makeState({
+        bounds: { x: 0, y: 0, width: 100, height: 50 },
+        content: "This text overflows more",
+        style: { fontSize: 28 },
+      }),
+    );
+    expect(measureText).toHaveBeenCalledTimes(1);
     node.dispose();
   });
 
@@ -609,6 +727,86 @@ describe("perElementCaptureNode", () => {
     node.dispose();
   });
 
+  it("uses a mutation observer instead of scanning code layer text every update", () => {
+    const originalMutationObserver = (
+      globalThis as { MutationObserver?: typeof MutationObserver }
+    ).MutationObserver;
+    const observers: Array<{
+      callback: MutationCallback;
+      disconnect: ReturnType<typeof vi.fn>;
+      observe: ReturnType<typeof vi.fn>;
+      takeRecords: ReturnType<typeof vi.fn>;
+    }> = [];
+    class FakeMutationObserver {
+      disconnect = vi.fn();
+      observe = vi.fn();
+      takeRecords = vi.fn(() => []);
+      constructor(readonly callback: MutationCallback) {
+        observers.push(this);
+      }
+    }
+    (
+      globalThis as { MutationObserver?: typeof MutationObserver }
+    ).MutationObserver =
+      FakeMutationObserver as unknown as typeof MutationObserver;
+
+    const sharedCapture = makeFakeSharedCapture();
+    const requestRender = vi.fn();
+    const root = new FakeElement();
+    const layer = new FakeElement();
+    layer.setAttribute("data-clipper-render-object-id", "layer-1");
+    root.appendChild(layer);
+    const factory = createPerElementCaptureFactory("code");
+    const node = factory.create({ id: "layer-1" } as FrameObject, {
+      sharedCapture:
+        sharedCapture as unknown as LayerNodeContext["sharedCapture"],
+      sourceRoot: () => root as unknown as Element,
+      requestRender,
+    });
+
+    for (let i = 0; i < 6; i++) {
+      expect(() =>
+        node.update(
+          makeState({
+            bounds: { x: 0, y: 0, width: 50, height: 25 },
+            props: { source: "untitled.tsx" },
+          }),
+        ),
+      ).not.toThrow();
+    }
+    const drawElementImage = getNodeCaptureContext(sharedCapture)
+      .drawElementImage as ReturnType<typeof vi.fn>;
+    drawElementImage.mockClear();
+
+    observers[0]?.callback([], observers[0] as unknown as MutationObserver);
+    node.update(
+      makeState({
+        bounds: { x: 0, y: 0, width: 50, height: 25 },
+        props: { source: "untitled.tsx" },
+      }),
+    );
+    node.update(
+      makeState({
+        bounds: { x: 0, y: 0, width: 50, height: 25 },
+        props: { source: "untitled.tsx" },
+      }),
+    );
+
+    expect(observers[0]?.observe).toHaveBeenCalledWith(layer, {
+      attributes: true,
+      characterData: true,
+      childList: true,
+      subtree: true,
+    });
+    expect(requestRender).toHaveBeenCalled();
+    expect(drawElementImage).toHaveBeenCalledTimes(1);
+    node.dispose();
+    expect(observers[0]?.disconnect).toHaveBeenCalled();
+    (
+      globalThis as { MutationObserver?: typeof MutationObserver }
+    ).MutationObserver = originalMutationObserver;
+  });
+
   it("waits for code SVG fallback instead of retrying capture every update", () => {
     const sharedCapture = makeFakeSharedCapture();
     const requestRender = vi.fn();
@@ -684,6 +882,66 @@ describe("perElementCaptureNode", () => {
     expect(drawElementImage).toHaveBeenCalledTimes(5);
     expect(node.object3D.material.uniforms.u_opacity.value).toBeCloseTo(0.4);
     node.dispose();
+  });
+
+  it("does not query capture DOM after non-code capture settles", () => {
+    const resizeObserver = installFakeResizeObserver();
+    const sharedCapture = makeFakeSharedCapture();
+    const root = new FakeElement();
+    const layer = new FakeElement();
+    layer.setAttribute("data-clipper-render-object-id", "layer-1");
+    root.appendChild(layer);
+    const sourceRoot = vi.fn(() => root as unknown as Element);
+    const factory = createPerElementCaptureFactory("text");
+    const node = factory.create({ id: "layer-1" } as FrameObject, {
+      sharedCapture:
+        sharedCapture as unknown as LayerNodeContext["sharedCapture"],
+      sourceRoot,
+      requestRender: () => {},
+    });
+
+    for (let i = 0; i < 6; i++) node.update(makeState());
+    sourceRoot.mockClear();
+
+    node.update(makeState());
+
+    expect(sourceRoot).not.toHaveBeenCalled();
+    expect(resizeObserver.observers[0]?.observe).toHaveBeenCalledWith(layer);
+    node.dispose();
+    expect(resizeObserver.observers[0]?.disconnect).toHaveBeenCalled();
+    resizeObserver.restore();
+  });
+
+  it("queries capture DOM again after settled text layout resizes", () => {
+    const resizeObserver = installFakeResizeObserver();
+    const sharedCapture = makeFakeSharedCapture();
+    const requestRender = vi.fn();
+    const root = new FakeElement();
+    const layer = new FakeElement();
+    layer.setAttribute("data-clipper-render-object-id", "layer-1");
+    root.appendChild(layer);
+    const sourceRoot = vi.fn(() => root as unknown as Element);
+    const factory = createPerElementCaptureFactory("text");
+    const node = factory.create({ id: "layer-1" } as FrameObject, {
+      sharedCapture:
+        sharedCapture as unknown as LayerNodeContext["sharedCapture"],
+      sourceRoot,
+      requestRender,
+    });
+
+    for (let i = 0; i < 6; i++) node.update(makeState());
+    sourceRoot.mockClear();
+
+    resizeObserver.observers[0]?.callback(
+      [],
+      resizeObserver.observers[0] as unknown as ResizeObserver,
+    );
+    node.update(makeState());
+
+    expect(requestRender).toHaveBeenCalled();
+    expect(sourceRoot).toHaveBeenCalledTimes(1);
+    node.dispose();
+    resizeObserver.restore();
   });
 
   it("opacity uniform follows state.style.opacity", () => {

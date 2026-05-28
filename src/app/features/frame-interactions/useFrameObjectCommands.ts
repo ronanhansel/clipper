@@ -1,6 +1,10 @@
 import type { Dispatch, SetStateAction } from "react";
 import type { RightPanelTab } from "../../types";
 import {
+  getSvgDrawContent,
+  type ComposeDrawTool,
+} from "../compose/composeDrawing";
+import {
   frameObjectFromBackgroundLayer,
   selectionObjectFromFrameObject,
   selectionPayloadFromObjects,
@@ -60,7 +64,7 @@ export function useFrameObjectCommands({
   updateSceneParts,
 }: FrameObjectCommandsParams) {
   function createComposeObject(
-    type: "rect" | "ellipse" | "text" | "media" | "pattern2d" | "code",
+    type: Exclude<ComposeDrawTool, "null"> | "media",
   ) {
     const id = `${type}-${Date.now().toString(36)}`;
     const isEllipse = type === "ellipse";
@@ -68,6 +72,10 @@ export function useFrameObjectCommands({
     const isMedia = type === "media";
     const isPattern2d = type === "pattern2d";
     const isCode = type === "code";
+    const isSvg = isFixedSvgDrawTool(type);
+    const isPolygon = type === "polygon";
+    const isStar = type === "star";
+    const bounds = getFixedObjectBounds(type);
     const object: FrameObject = {
       id,
       name: isText
@@ -80,7 +88,7 @@ export function useFrameObjectCommands({
               ? "Pattern"
               : isCode
                 ? "Code"
-                : "Rectangle",
+                : getFixedShapeName(type),
       type: isText
         ? "text"
         : isMedia
@@ -89,14 +97,23 @@ export function useFrameObjectCommands({
             ? "pattern2d"
             : isCode
               ? "code"
-              : "rect",
+              : isSvg
+                ? "svg"
+                : "rect",
       selector: `[data-object-id='${id}']`,
-      bounds: isText
-        ? { x: 220, y: 140, width: 320, height: 92 }
-        : isMedia || isPattern2d || isCode
-          ? { x: 200, y: 120, width: 480, height: 320 }
-          : { x: 220, y: 140, width: 220, height: 140 },
-      content: isText ? "Text" : undefined,
+      bounds,
+      content: isText
+        ? "Text"
+        : isSvg
+          ? getSvgDrawContent(
+              type,
+              { x: bounds.x, y: bounds.y + bounds.height / 2 },
+              { x: bounds.x + bounds.width, y: bounds.y + bounds.height / 2 },
+              undefined,
+              undefined,
+              bounds,
+            )
+          : undefined,
       style: isText
         ? { color: "#ffffff", fontSize: 72, fontWeight: 400, lineHeight: 1.1 }
         : isMedia
@@ -109,10 +126,24 @@ export function useFrameObjectCommands({
             ? { backgroundColor: "transparent", overflow: "hidden" }
             : isCode
               ? { backgroundColor: "transparent", overflow: "hidden" }
-              : {
-                  backgroundColor: "#D5D5D5",
-                  ...(isEllipse ? { borderRadius: 9999 } : {}),
-                },
+              : isSvg
+                ? { backgroundColor: "transparent", overflow: "visible" }
+                : {
+                    backgroundColor: "#D5D5D5",
+                    ...(isEllipse ? { borderRadius: 9999 } : {}),
+                    ...(isPolygon
+                      ? {
+                          clipPath:
+                            "polygon(50% 0%, 100% 38%, 82% 100%, 18% 100%, 0% 38%)",
+                        }
+                      : {}),
+                    ...(isStar
+                      ? {
+                          clipPath:
+                            "polygon(50% 0%, 61% 35%, 98% 35%, 68% 56%, 79% 91%, 50% 70%, 21% 91%, 32% 56%, 2% 35%, 39% 35%)",
+                        }
+                      : {}),
+                  },
       props: isPattern2d
         ? {
             preset: "polkaDots",
@@ -380,6 +411,41 @@ export function useFrameObjectCommands({
     updateSelectedPartDuration,
     updateTextObjectContent,
   };
+}
+
+function getFixedObjectBounds(
+  type: Exclude<ComposeDrawTool, "null"> | "media",
+) {
+  if (type === "text") return { x: 220, y: 140, width: 320, height: 92 };
+  if (type === "media" || type === "pattern2d" || type === "code") {
+    return { x: 200, y: 120, width: 480, height: 320 };
+  }
+  if (isFixedSvgDrawTool(type))
+    return { x: 220, y: 200, width: 320, height: 10 };
+  return { x: 220, y: 140, width: 220, height: 140 };
+}
+
+function isFixedSvgDrawTool(
+  type: Exclude<ComposeDrawTool, "null"> | "media",
+): type is "line" | "arrow" | "pen" | "pencil" | "textPath" {
+  return (
+    type === "line" ||
+    type === "arrow" ||
+    type === "pen" ||
+    type === "pencil" ||
+    type === "textPath"
+  );
+}
+
+function getFixedShapeName(type: Exclude<ComposeDrawTool, "null"> | "media") {
+  if (type === "line") return "Line";
+  if (type === "arrow") return "Arrow";
+  if (type === "polygon") return "Polygon";
+  if (type === "star") return "Star";
+  if (type === "pen") return "Path";
+  if (type === "pencil") return "Pencil";
+  if (type === "textPath") return "Text on path";
+  return "Rectangle";
 }
 
 function lightName(kind: LightObjectKind) {

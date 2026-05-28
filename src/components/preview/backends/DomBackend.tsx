@@ -45,6 +45,7 @@ export const DomBackend: CompositionBackend = function DomBackend({
   hideNullObjects,
   hostRef,
   isPlaying,
+  liveCodeObjectTime = true,
   part,
   renderClockSceneTime,
   localTime,
@@ -237,6 +238,7 @@ export const DomBackend: CompositionBackend = function DomBackend({
               focusPicking={active && focusPicking}
               frameScale={childFrameScale}
               isPlaying={isPlaying}
+              liveCodeObjectTime={liveCodeObjectTime}
               previewTime={localTime}
               liveTimeOffset={localTime - renderClockSceneTime}
               renderMode={renderMode}

@@ -7,7 +7,7 @@ import {
   type FrameObjectType,
   type LightObjectKind,
 } from "../../../../core/types";
-import { evaluateObjectState } from "../../../../core/propertyRegistry";
+import type { EvaluatedObjectState } from "../../../../core/propertyRegistry";
 import {
   getLayerNodeFactory,
   registerLayerNodeFactory,
@@ -28,6 +28,7 @@ import {
   type LayerLightingState,
   type LayerShadowState,
 } from "./layerLighting";
+import { readPreviewObjectState } from "../readPreviewObjectState";
 
 /**
  * Register the default per-type Three node factories. Idempotent —
@@ -71,9 +72,16 @@ type Entry = {
   id: string;
   type: FrameObjectType;
   node: LayerNode;
+  lastStaticObject?: FrameObject;
+  lastStaticStackIndex?: number;
 };
 
 const FLAT_LAYER_RENDER_ORDER_BASE = 100;
+const STATIC_LAYER_UPDATE_SKIP_TYPES = new Set<FrameObjectType>([
+  "rect",
+  "text",
+  "null",
+]);
 
 type MaterialDepthDefaults = {
   depthTest: boolean;
@@ -83,7 +91,7 @@ type MaterialDepthDefaults = {
   polygonOffsetUnits: number;
 };
 
-function isFlatLayer(state: ReturnType<typeof evaluateObjectState>): boolean {
+function isFlatLayer(state: EvaluatedObjectState): boolean {
   const transform = state.transform ?? {};
   return (
     readTransformNumber(transform.translateZ) === 0 &&
@@ -206,6 +214,11 @@ export class LayerNodeSync {
   private readonly entries = new Map<string, Entry>();
   private readonly context: LayerNodeContext;
   private lighting: LayerLightingState = EMPTY_LAYER_LIGHTING;
+  private lightingPart: CompositionClip | null = null;
+  private lightingReusableForPart = false;
+  private entriesVersion = 0;
+  private appliedLightingEntriesVersion = -1;
+  private appliedLightingSignature = "";
 
   constructor(context: Omit<LayerNodeContext, "getLighting">) {
     installDefaultLayerNodeFactories();
@@ -224,7 +237,7 @@ export class LayerNodeSync {
   ): void {
     const seen = new Set<string>();
     if (part) {
-      this.lighting = buildLayerLightingState(part, localTime);
+      this.lighting = this.readLayerLightingState(part, localTime);
       let stackIndex = 0;
       for (const object of part.objects) {
         if (object.hidden) continue;
@@ -239,6 +252,7 @@ export class LayerNodeSync {
           this.group.remove(entry.node.object3D);
           entry.node.dispose();
           this.entries.delete(object.id);
+          this.entriesVersion += 1;
           entry = undefined;
         }
         if (!entry) {
@@ -248,23 +262,40 @@ export class LayerNodeSync {
           entry = { id: object.id, type: object.type, node };
           this.entries.set(object.id, entry);
           this.group.add(node.object3D);
+          this.entriesVersion += 1;
         }
 
-        const state = evaluateObjectState(object, localTime);
-        entry.node.update(state, {
-          localTime,
-          isPlaying: options.isPlaying === true,
-        });
-        tagLayerObject(entry.node.object3D, object);
-        applyLayerRenderSemantics(
-          entry.node.object3D,
+        const shouldSkipStaticUpdate = canSkipStaticLayerUpdate(
+          entry,
+          object,
           stackIndex,
-          isFlatLayer(state),
         );
+        if (!shouldSkipStaticUpdate) {
+          const state = readPreviewObjectState(object, localTime);
+          entry.node.update(state, {
+            localTime,
+            isPlaying: options.isPlaying === true,
+          });
+          tagLayerObject(entry.node.object3D, object);
+          applyLayerRenderSemantics(
+            entry.node.object3D,
+            stackIndex,
+            isFlatLayer(state),
+          );
+          if (isStaticLayerUpdateSkippable(object)) {
+            entry.lastStaticObject = object;
+            entry.lastStaticStackIndex = stackIndex;
+          } else {
+            entry.lastStaticObject = undefined;
+            entry.lastStaticStackIndex = undefined;
+          }
+        }
         stackIndex += 1;
       }
     } else {
       this.lighting = EMPTY_LAYER_LIGHTING;
+      this.lightingPart = null;
+      this.lightingReusableForPart = false;
     }
 
     for (const [id, entry] of this.entries) {
@@ -272,6 +303,7 @@ export class LayerNodeSync {
       this.group.remove(entry.node.object3D);
       entry.node.dispose();
       this.entries.delete(id);
+      this.entriesVersion += 1;
     }
   }
 
@@ -287,6 +319,15 @@ export class LayerNodeSync {
       ...this.lighting,
       shadow,
     };
+    const signature = getLayerLightingSignature(this.lighting);
+    if (
+      signature === this.appliedLightingSignature &&
+      this.entriesVersion === this.appliedLightingEntriesVersion
+    ) {
+      return;
+    }
+    this.appliedLightingSignature = signature;
+    this.appliedLightingEntriesVersion = this.entriesVersion;
     for (const entry of this.entries.values()) {
       applyLightingToObject(entry.node.object3D, this.lighting);
     }
@@ -298,11 +339,54 @@ export class LayerNodeSync {
       entry.node.dispose();
     }
     this.entries.clear();
+    this.entriesVersion += 1;
+    this.appliedLightingEntriesVersion = -1;
   }
 
   dispose(): void {
     this.clear();
   }
+
+  private readLayerLightingState(
+    part: CompositionClip,
+    localTime: number,
+  ): LayerLightingState {
+    if (this.lightingPart === part && this.lightingReusableForPart) {
+      return {
+        ...this.lighting,
+        shadow: EMPTY_LAYER_LIGHTING.shadow,
+      };
+    }
+    this.lightingPart = part;
+    this.lightingReusableForPart = isLayerLightingReusableForPart(part);
+    return buildLayerLightingState(part, localTime);
+  }
+}
+
+function isLayerLightingReusableForPart(part: CompositionClip): boolean {
+  return part.objects.every((object) => {
+    if (object.type !== "light" || object.hidden) return true;
+    if (Object.keys(object.tracks ?? {}).length > 0) return false;
+    return !object.animations?.some((animation) => animation.enabled !== false);
+  });
+}
+
+function canSkipStaticLayerUpdate(
+  entry: Entry,
+  object: FrameObject,
+  stackIndex: number,
+): boolean {
+  return (
+    entry.lastStaticObject === object &&
+    entry.lastStaticStackIndex === stackIndex &&
+    isStaticLayerUpdateSkippable(object)
+  );
+}
+
+function isStaticLayerUpdateSkippable(object: FrameObject): boolean {
+  if (!STATIC_LAYER_UPDATE_SKIP_TYPES.has(object.type)) return false;
+  if (Object.keys(object.tracks ?? {}).length > 0) return false;
+  return !object.animations?.some((animation) => animation.enabled !== false);
 }
 
 function tagLayerObject(
@@ -350,6 +434,34 @@ function applyLightingToObject(
     return;
   }
   applyLightingToMaterial(root.material, lighting);
+}
+
+function getLayerLightingSignature(lighting: LayerLightingState): string {
+  const shadow = lighting.shadow;
+  return JSON.stringify({
+    active: lighting.active,
+    lights: lighting.lights.map((light) => ({
+      kind: light.kind,
+      color: light.color,
+      intensity: light.intensity,
+      position: light.position,
+      target: light.target,
+      range: light.range,
+      angle: light.angle,
+      softness: light.softness,
+    })),
+    shadow: {
+      active: shadow.active,
+      texture: shadow.texture?.uuid ?? null,
+      matrix: shadow.matrix.elements,
+      viewMatrix: shadow.viewMatrix.elements,
+      near: shadow.near,
+      far: shadow.far,
+      bias: shadow.bias,
+      darkness: shadow.darkness,
+      mapFlipY: shadow.mapFlipY,
+    },
+  });
 }
 
 function applyLightingToMaterial(
@@ -413,7 +525,7 @@ function isLayerLightingUniforms(
 }
 
 function lightStateFromObject(object: FrameObject, localTime: number) {
-  const evaluated = evaluateObjectState(object, localTime);
+  const evaluated = readPreviewObjectState(object, localTime);
   const transform =
     evaluated.transform && typeof evaluated.transform === "object"
       ? evaluated.transform

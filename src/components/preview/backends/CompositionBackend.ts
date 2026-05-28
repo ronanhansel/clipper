@@ -33,6 +33,7 @@ export type CompositionRenderBackendProps = {
   adjustmentLayers?: AdjustmentLayer[];
   transitionLayers?: TransitionLayer[];
   cameraPreviewOverride?: CameraObjectProps | null;
+  liveCodeObjectTime?: boolean;
   /**
    * When true, the backend's caller already projects the composition's
    * camera externally (e.g. via CSS3DRenderer). The backend must NOT

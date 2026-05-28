@@ -4,6 +4,7 @@ import { LayerNodeSync } from "./LayerNodeSync";
 import {
   createLayerLightingNodes,
   createLayerLightingUniforms,
+  type LayerShadowState,
 } from "./layerLighting";
 import {
   clearLayerNodeRegistry,
@@ -54,15 +55,18 @@ class TrackingNode implements LayerNode {
   readonly object3D: any;
   updates = 0;
   disposed = false;
+  lastState: FrameObject | null = null;
   constructor(
     public readonly id: string,
     public readonly type: FrameObjectType,
   ) {
     this.object3D = new THREE.Object3D();
     this.object3D.name = `tracking:${id}:${type}`;
+    this.object3D.userData.trackingNode = this;
   }
-  update() {
+  update(state: FrameObject) {
     this.updates += 1;
+    this.lastState = state;
   }
   dispose() {
     this.disposed = true;
@@ -204,6 +208,103 @@ describe("LayerNodeSync", () => {
     sync.dispose();
   });
 
+  it("reuses static layer object state and evaluates tracked state", () => {
+    const sync = new LayerNodeSync(makeContext());
+    const staticObject = makeObject("static", "rect");
+    const trackedObject = {
+      ...makeObject("tracked", "rect"),
+      tracks: {
+        "bounds.x": {
+          valueType: "number" as const,
+          points: [
+            { time: 0, value: 0 },
+            { time: 2, value: 20 },
+          ],
+        },
+      },
+    };
+
+    sync.sync(makePart([staticObject, trackedObject]), 1);
+
+    const staticNode = sync.group.children[0].userData
+      .trackingNode as TrackingNode;
+    const trackedNode = sync.group.children[1].userData
+      .trackingNode as TrackingNode;
+    expect(staticNode.lastState).toBe(staticObject);
+    expect(trackedNode.lastState).not.toBe(trackedObject);
+    expect(trackedNode.lastState?.bounds.x).toBe(10);
+    sync.dispose();
+  });
+
+  it("skips repeated native static layer updates when object and stack are unchanged", () => {
+    const sync = new LayerNodeSync(makeContext());
+    const staticObject = makeObject("static", "rect");
+    const part = makePart([staticObject]);
+
+    sync.sync(part, 0);
+    sync.sync(part, 1);
+
+    const node = sync.group.children[0].userData.trackingNode as TrackingNode;
+    expect(node.updates).toBe(1);
+    sync.dispose();
+  });
+
+  it("keeps updating tracked layers as local time changes", () => {
+    const sync = new LayerNodeSync(makeContext());
+    const trackedObject = {
+      ...makeObject("tracked", "rect"),
+      tracks: {
+        "bounds.x": {
+          valueType: "number" as const,
+          points: [
+            { time: 0, value: 0 },
+            { time: 2, value: 20 },
+          ],
+        },
+      },
+    };
+    const part = makePart([trackedObject]);
+
+    sync.sync(part, 0);
+    sync.sync(part, 1);
+
+    const node = sync.group.children[0].userData.trackingNode as TrackingNode;
+    expect(node.updates).toBe(2);
+    expect(node.lastState?.bounds.x).toBe(10);
+    sync.dispose();
+  });
+
+  it("keeps updating enabled layer animations", () => {
+    const sync = new LayerNodeSync(makeContext());
+    const animatedObject = {
+      ...makeObject("animated", "rect"),
+      animations: [
+        {
+          id: "move",
+          tracks: [
+            {
+              property: "x" as const,
+              valueType: "number" as const,
+              points: [
+                { id: "x:0", time: 0, value: 0 },
+                { id: "x:1", time: 2, value: 20 },
+              ],
+            },
+          ],
+          options: { duration: 2 },
+        },
+      ],
+    };
+    const part = makePart([animatedObject]);
+
+    sync.sync(part, 0);
+    sync.sync(part, 1);
+
+    const node = sync.group.children[0].userData.trackingNode as TrackingNode;
+    expect(node.updates).toBe(2);
+    sync.dispose();
+  });
+
   it("removes nodes for objects no longer present", () => {
     const sync = new LayerNodeSync(makeContext());
     sync.sync(makePart([makeObject("a", "rect"), makeObject("b", "rect")]), 0);
@@ -312,6 +413,101 @@ describe("LayerNodeSync", () => {
     expect(nodes.u_lightAngle.array[0]).toBe(60);
     expect(nodes.u_lightKind.array[0]).toBe(1);
     expect(nodes.u_shadowMapFlipY.value).toBe(0);
+    sync.dispose();
+  });
+
+  it("skips repeated lighting uniform writes until lighting or entries change", () => {
+    clearLayerNodeRegistry();
+    registerLayerNodeFactory(makeWebGpuLightingTrackingFactory("default"));
+    const sync = new LayerNodeSync(makeContext());
+    const shadow: LayerShadowState = {
+      active: false,
+      texture: null,
+      matrix: new THREE.Matrix4(),
+      viewMatrix: new THREE.Matrix4(),
+      near: 1,
+      far: 1200,
+      bias: 0.004,
+      darkness: 0.72,
+      mapFlipY: false,
+    };
+    const makeLitPart = (intensity: number) =>
+      makePart([
+        {
+          ...makeObject("light", "light"),
+          props: {
+            kind: "directional",
+            color: "#ff3300",
+            intensity,
+            range: 900,
+            angle: 60,
+          },
+        },
+        makeObject("rect", "rect"),
+      ]);
+
+    sync.sync(makeLitPart(2), 0);
+    sync.applyShadow(shadow);
+    const mesh = sync.group.children[0] as any;
+    const nodes = mesh.material.userData.layerLightingNodes;
+    nodes.u_lightIntensity.array[0] = 99;
+    sync.applyShadow(shadow);
+    expect(nodes.u_lightIntensity.array[0]).toBe(99);
+
+    sync.sync(makeLitPart(3), 0);
+    sync.applyShadow(shadow);
+    expect(nodes.u_lightIntensity.array[0]).toBe(3);
+    sync.dispose();
+  });
+
+  it("updates tracked light state when the same part is synced at a new time", () => {
+    clearLayerNodeRegistry();
+    registerLayerNodeFactory(makeWebGpuLightingTrackingFactory("default"));
+    const sync = new LayerNodeSync(makeContext());
+    const shadow: LayerShadowState = {
+      active: false,
+      texture: null,
+      matrix: new THREE.Matrix4(),
+      viewMatrix: new THREE.Matrix4(),
+      near: 1,
+      far: 1200,
+      bias: 0.004,
+      darkness: 0.72,
+      mapFlipY: false,
+    };
+    const part = makePart([
+      {
+        ...makeObject("light", "light"),
+        props: {
+          kind: "directional",
+          color: "#ff3300",
+          intensity: 1,
+          range: 900,
+          angle: 60,
+        },
+        tracks: {
+          "props.intensity": {
+            valueType: "number",
+            points: [
+              { time: 0, value: 1 },
+              { time: 2, value: 5 },
+            ],
+          },
+        },
+      },
+      makeObject("rect", "rect"),
+    ]);
+
+    sync.sync(part, 0);
+    sync.applyShadow(shadow);
+    const mesh = sync.group.children[0] as any;
+    const nodes = mesh.material.userData.layerLightingNodes;
+    expect(nodes.u_lightIntensity.array[0]).toBe(1);
+
+    sync.sync(part, 2);
+    sync.applyShadow(shadow);
+
+    expect(nodes.u_lightIntensity.array[0]).toBe(5);
     sync.dispose();
   });
 

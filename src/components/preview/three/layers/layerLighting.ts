@@ -379,6 +379,7 @@ export function applyLayerLightingUniforms(
     userData?: {
       layerLightingUniforms?: unknown;
       layerLightingNodes?: LayerLightingNodes;
+      layerLightingSignature?: string;
     };
   },
   lighting: LayerLightingState,
@@ -392,6 +393,13 @@ export function applyLayerLightingUniforms(
   const lights = lighting.active
     ? lighting.lights.slice(0, MAX_LAYER_LIGHTS)
     : [];
+  const signature = getLayerLightingUniformSignature(
+    lighting.active,
+    lights,
+    shadow,
+  );
+  if (material.userData?.layerLightingSignature === signature) return;
+  if (material.userData) material.userData.layerLightingSignature = signature;
   uniforms.u_lightingActive.value = lighting.active ? 1 : 0;
   uniforms.u_lightCount.value = lights.length;
   uniforms.u_shadowActive.value = shadow.active ? 1 : 0;
@@ -435,6 +443,41 @@ export function applyLayerLightingUniforms(
     );
   }
   syncLayerLightingNodes(material.userData?.layerLightingNodes, uniforms);
+}
+
+function getLayerLightingUniformSignature(
+  active: boolean,
+  lights: LayerLightState[],
+  shadow: LayerShadowState,
+): string {
+  return JSON.stringify({
+    active,
+    lights: active
+      ? lights.map((light) => ({
+          kind: light.kind,
+          color: light.color,
+          intensity: light.intensity,
+          position: light.position,
+          target: light.target,
+          range: light.range,
+          angle: light.angle,
+          softness: light.softness,
+        }))
+      : [],
+    shadow: shadow.active
+      ? {
+          texture: shadow.texture?.uuid ?? null,
+          textureVersion: shadow.texture?.version ?? 0,
+          matrix: shadow.matrix.elements,
+          viewMatrix: shadow.viewMatrix.elements,
+          near: shadow.near,
+          far: shadow.far,
+          bias: shadow.bias,
+          darkness: shadow.darkness,
+          mapFlipY: shadow.mapFlipY,
+        }
+      : { active: false },
+  });
 }
 
 function syncLayerLightingNodes(

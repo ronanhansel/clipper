@@ -13,10 +13,6 @@ import {
   readCompositionRendererBackendRequest,
   selectCompositionRendererBackend,
 } from "./compositionRendererBackend";
-import {
-  buildCameraComposerPasses,
-  getCameraComposerPassSignature,
-} from "./cameraComposerPasses";
 import { DomBackend } from "../backends/DomBackend";
 import { computePostProcessPlan } from "../passes/usePostProcessPlan";
 import {
@@ -31,6 +27,7 @@ import {
   getMasterTimelineClockSnapshot,
   isMasterClockLive,
   subscribeMasterTimelineClock,
+  type MasterTimelineClockSource,
 } from "../../../app/features/playback/playbackTimeStore";
 import {
   getTransitionFinishTime,
@@ -46,6 +43,7 @@ import {
   type FrameObject,
   type TransitionLayer,
 } from "../../../core/types";
+import type { PostProcessPass } from "../../../core/effects/types";
 import { defaultPreviewFps } from "../../../core/previewFps";
 import type { CompositionBackendProps } from "../backends/CompositionBackend";
 import { useOptionalPreviewRenderScheduler } from "../scheduler/PreviewRenderSchedulerContext";
@@ -112,8 +110,94 @@ const SOURCE_INNER_STYLE: React.CSSProperties = {
   overflow: "hidden",
 };
 
+const EMPTY_DIRECT_GPU_POST_PROCESS_PASSES: readonly PostProcessPass[] = [];
+
 const maxRecentDirectSourceStacks = 2;
 const maxDirectSourceSlots = 12;
+
+export function shouldRenderDirectLiveClockFallback({
+  hasScheduler,
+  source,
+}: {
+  hasScheduler: boolean;
+  source: MasterTimelineClockSource;
+}) {
+  if (source === "idle") return false;
+  if (source === "playback" && hasScheduler) return false;
+  return true;
+}
+
+export function shouldUseDirectSourceParentClock({
+  animationsEnabled,
+  parts,
+}: {
+  animationsEnabled: boolean;
+  parts: readonly CompositionClip[];
+}) {
+  return parts.some((part) =>
+    part.objects.some((object) =>
+      doesDirectSourceObjectNeedParentClock(object, animationsEnabled),
+    ),
+  );
+}
+
+export function hasDirectGpuPostProcessInputs({
+  adjustmentLayers,
+  transitionLayers,
+}: {
+  adjustmentLayers?: readonly AdjustmentLayer[];
+  transitionLayers?: readonly TransitionLayer[];
+}) {
+  return Boolean(adjustmentLayers?.length || transitionLayers?.length);
+}
+
+function getDirectGpuPostProcessPasses({
+  sceneTime,
+  adjustmentLayers,
+  transitionLayers,
+}: {
+  sceneTime: number;
+  adjustmentLayers?: AdjustmentLayer[];
+  transitionLayers?: TransitionLayer[];
+}): readonly PostProcessPass[] {
+  if (!hasDirectGpuPostProcessInputs({ adjustmentLayers, transitionLayers })) {
+    return EMPTY_DIRECT_GPU_POST_PROCESS_PASSES;
+  }
+  return computePostProcessPlan(
+    sceneTime,
+    adjustmentLayers,
+    { transitionLayers },
+    { width: FRAME_WIDTH, height: FRAME_HEIGHT },
+  ).livePasses;
+}
+
+function doesDirectSourceObjectNeedParentClock(
+  object: FrameObject,
+  animationsEnabled: boolean,
+) {
+  if (object.hidden || object.type === "light") return false;
+  if (object.type === "composition") return true;
+  if (!doesDirectSourceObjectRenderThroughDomCapture(object)) return false;
+  if (Object.keys(object.tracks ?? {}).length > 0) return true;
+  if (
+    animationsEnabled &&
+    object.animations?.some((animation) => animation.enabled !== false)
+  )
+    return true;
+  return false;
+}
+
+function doesDirectSourceObjectRenderThroughDomCapture(object: FrameObject) {
+  switch (object.type) {
+    case "html":
+    case "template":
+    case "custom-renderer":
+    case "pattern2d":
+      return true;
+    default:
+      return false;
+  }
+}
 
 /**
  * `DirectCompositionGpuHost` mounts a `CompositionRenderer` (through-camera
@@ -139,7 +223,6 @@ export const DirectCompositionGpuHost = memo(function DirectCompositionGpuHost(
     new Map<string, HTMLDivElement | null>(),
   );
   const rendererRef = useRef<CompositionRenderer | null>(null);
-  const composerPassSignatureRef = useRef("");
   const pendingCameraPreviewRef = useRef<CameraObjectProps | null>(null);
   const pendingObjectPreviewRef = useRef<FrameObject | null>(null);
   const cameraPreviewFrameRef = useRef<number>(0);
@@ -175,9 +258,23 @@ export const DirectCompositionGpuHost = memo(function DirectCompositionGpuHost(
       : props.transitionComposite.to.localTime -
         props.transitionComposite.to.sceneTime;
   const renderPreviewFps = backendProps.previewFps ?? defaultPreviewFps;
+  const parentClockParts = useMemo(() => {
+    const parts = [part];
+    if (props.transitionComposite) {
+      parts.push(props.transitionComposite.from.part);
+      parts.push(props.transitionComposite.to.part);
+    }
+    for (const slot of props.sourceSlots ?? []) parts.push(slot.part);
+    return parts;
+  }, [part, props.sourceSlots, props.transitionComposite]);
+  const sourceUsesParentClock = shouldUseDirectSourceParentClock({
+    animationsEnabled: backendProps.animationsEnabled,
+    parts: parentClockParts,
+  });
   const liveSceneTime = useDirectLiveSceneFrame(
     backendProps.renderClockSceneTime,
     renderPreviewFps,
+    sourceUsesParentClock,
   );
   const sourceSlotCacheRef = useRef<DirectSourceSlotCache>({ stacks: [] });
   const liveLocalTime =
@@ -278,25 +375,12 @@ export const DirectCompositionGpuHost = memo(function DirectCompositionGpuHost(
     const cameraProps =
       cameraOverride ?? getActiveCameraObjectProps(renderPart, time);
     renderer.setCamera(cameraProps);
-    const composerPasses = buildCameraComposerPasses(cameraProps, {
-      width: FRAME_WIDTH,
-      height: FRAME_HEIGHT,
-    });
-    const nextComposerPassSignature =
-      getCameraComposerPassSignature(composerPasses);
-    if (nextComposerPassSignature !== composerPassSignatureRef.current) {
-      renderer.setComposerPasses(composerPasses);
-      composerPassSignatureRef.current = nextComposerPassSignature;
-    } else {
-      disposeComposerPasses(composerPasses);
-    }
     const sceneTime = time - liveLocalTimeOffset;
-    const postProcessPasses = computePostProcessPlan(
+    const postProcessPasses = getDirectGpuPostProcessPasses({
       sceneTime,
-      props.adjustmentLayers,
-      { transitionLayers: props.transitionLayers },
-      { width: FRAME_WIDTH, height: FRAME_HEIGHT },
-    ).livePasses;
+      adjustmentLayers: props.adjustmentLayers,
+      transitionLayers: props.transitionLayers,
+    });
     renderer.setGpuPostProcessPasses(postProcessPasses);
     renderer.setComposition(renderPart, time, activeSourceContainer(), {
       isPlaying: options.isPlaying === true,
@@ -328,12 +412,11 @@ export const DirectCompositionGpuHost = memo(function DirectCompositionGpuHost(
       fromLocalTime,
     );
     const toCamera = getActiveCameraObjectProps(composite.to.part, toLocalTime);
-    const postProcessPasses = computePostProcessPlan(
+    const postProcessPasses = getDirectGpuPostProcessPasses({
       sceneTime,
-      props.adjustmentLayers,
-      { transitionLayers: props.transitionLayers },
-      { width: FRAME_WIDTH, height: FRAME_HEIGHT },
-    ).livePasses;
+      adjustmentLayers: props.adjustmentLayers,
+      transitionLayers: props.transitionLayers,
+    });
     renderer.setGpuPostProcessPasses(postProcessPasses);
     renderer.setTransitionComposition({
       from: {
@@ -482,7 +565,6 @@ export const DirectCompositionGpuHost = memo(function DirectCompositionGpuHost(
 
     return () => {
       rendererRef.current = null;
-      composerPassSignatureRef.current = "";
       setCaptureCanvas(null);
       setTransitionCaptureCanvas(null);
       if (captureCanvasEl.parentNode === portalTarget)
@@ -548,7 +630,7 @@ export const DirectCompositionGpuHost = memo(function DirectCompositionGpuHost(
       const objectOverride = pendingObjectPreviewRef.current;
       const renderOptions = {
         isPlaying: cause === "play-tick",
-        syncShadows: cameraOverride || objectOverride ? false : undefined,
+        syncShadows: cameraOverride && !objectOverride ? false : undefined,
       };
       if (props.transitionComposite && transitionCaptureCanvas) {
         renderTransitionAtSceneTime(renderer, snap.adjustedSceneTime, {
@@ -570,7 +652,13 @@ export const DirectCompositionGpuHost = memo(function DirectCompositionGpuHost(
     const unsubscribeScheduler = scheduler?.subscribe(renderLiveFrame);
     const unsubscribeClock = subscribeMasterTimelineClock(() => {
       const snap = getMasterTimelineClockSnapshot();
-      if (!isMasterClockLive(snap)) return;
+      if (
+        !shouldRenderDirectLiveClockFallback({
+          hasScheduler: scheduler != null,
+          source: snap.source,
+        })
+      )
+        return;
       if (liveClockFallbackFrameRef.current) return;
       liveClockFallbackFrameRef.current = requestAnimationFrame((now) => {
         liveClockFallbackFrameRef.current = 0;
@@ -615,7 +703,7 @@ export const DirectCompositionGpuHost = memo(function DirectCompositionGpuHost(
         renderer,
         localTime,
         cameraOverride,
-        { syncShadows: false },
+        { syncShadows: cameraOverride && !objectOverride ? false : undefined },
         objectOverride,
       );
     });
@@ -686,6 +774,7 @@ export const DirectCompositionGpuHost = memo(function DirectCompositionGpuHost(
                     previewFps={backendProps.previewFps}
                     hideNullObjects={backendProps.hideNullObjects ?? false}
                     isPlaying={isActive ? backendProps.isPlaying : false}
+                    liveCodeObjectTime={isActive}
                     renderClockSceneTime={
                       isActive ? backendProps.renderClockSceneTime : undefined
                     }
@@ -711,6 +800,7 @@ export const DirectCompositionGpuHost = memo(function DirectCompositionGpuHost(
                 previewFps={backendProps.previewFps}
                 hideNullObjects={backendProps.hideNullObjects ?? false}
                 isPlaying={backendProps.isPlaying}
+                liveCodeObjectTime={true}
                 renderClockSceneTime={
                   props.transitionComposite?.to.sceneTime ??
                   backendProps.renderClockSceneTime
@@ -728,13 +818,6 @@ export const DirectCompositionGpuHost = memo(function DirectCompositionGpuHost(
   );
 });
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-function disposeComposerPasses(passes: readonly any[]) {
-  for (const pass of passes) {
-    if (typeof pass.dispose === "function") pass.dispose();
-  }
-}
-
 function clampNumber(value: number, min: number, max: number) {
   return Math.min(Math.max(value, min), max);
 }
@@ -742,11 +825,19 @@ function clampNumber(value: number, min: number, max: number) {
 function useDirectLiveSceneFrame(
   fallbackSceneTime: number,
   previewFps: number,
+  enabled: boolean,
 ) {
+  const fallbackFrame = Math.round(fallbackSceneTime * previewFps) / previewFps;
   return useSyncExternalStore(
-    subscribeMasterTimelineClock,
-    () => readDirectLiveSceneFrame(fallbackSceneTime, previewFps),
-    () => readDirectLiveSceneFrame(fallbackSceneTime, previewFps),
+    (onChange) => {
+      if (!enabled) return () => {};
+      return subscribeMasterTimelineClock(onChange);
+    },
+    () =>
+      enabled
+        ? readDirectLiveSceneFrame(fallbackSceneTime, previewFps)
+        : fallbackFrame,
+    () => fallbackFrame,
   );
 }
 
@@ -899,6 +990,7 @@ const DirectCompositionGpuSourceSlot = memo(
     compositionLibrary,
     sourceContainerRefs,
     sourceKind,
+    liveCodeObjectTime,
   }: {
     slotKey: string;
     slot: TimelinePreviewStackPart;
@@ -913,6 +1005,7 @@ const DirectCompositionGpuSourceSlot = memo(
     compositionLibrary?: CompositionClip[];
     sourceContainerRefs: MutableRefObject<Map<string, HTMLDivElement | null>>;
     sourceKind?: string;
+    liveCodeObjectTime: boolean;
   }) {
     const sourceContainerRef = useRef<HTMLDivElement | null>(null);
     useEffect(() => {
@@ -944,6 +1037,7 @@ const DirectCompositionGpuSourceSlot = memo(
           hideNullObjects={hideNullObjects}
           hostRef={sourceContainerRef}
           isPlaying={isPlaying}
+          liveCodeObjectTime={liveCodeObjectTime}
           localTime={slot.previewTime}
           part={slot.part}
           renderClockSceneTime={

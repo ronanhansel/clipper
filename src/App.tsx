@@ -60,6 +60,7 @@ import { useComposeSelectionCommands } from "./app/features/compose/useComposeSe
 import { useComposeSelectionHydration } from "./app/features/compose/useComposeSelectionHydration";
 import { usePenDraftShortcuts } from "./app/features/compose/usePenDraftShortcuts";
 import { useComposeDrawing } from "./app/features/compose/useComposeDrawing";
+import type { ComposeDrawTool } from "./app/features/compose/composeDrawing";
 import { useTimelineLayerCommands } from "./app/features/timeline/useTimelineLayerCommands";
 import { useMotionMarkerCommands } from "./app/features/timeline/useMotionMarkerCommands";
 import { useTimelineClipboardCommands } from "./app/features/timeline/useTimelineClipboardCommands";
@@ -1504,6 +1505,12 @@ function AppContent({
     updateCompositionForTimelinePart,
     updateSceneParts,
   });
+  const insertComposeDrawToolsImmediately =
+    sceneWrap?.flattenComposition === false &&
+    project.editorState?.threeAuthorView?.previewMode !== "2d" &&
+    activeComposePart.objects.some(
+      (object) => object.type === "camera" && !object.hidden,
+    );
   const { previewSelectedObject, previewPartFrame, previewPartBackground } =
     useComposeObjectPreview({
       frameViewportRef,
@@ -1740,6 +1747,19 @@ function AppContent({
     onFramePointerMove,
     onFramePointerUp,
   });
+
+  const addComposeDrawObject = useCallback(
+    (tool: ComposeDrawTool) => {
+      if (tool === "null") {
+        composeDrawing.addNullObjectToFrameCenter();
+        return;
+      }
+      createComposeObject(tool);
+      activeToolRef.current = null;
+      setActiveTool(null);
+    },
+    [activeToolRef, composeDrawing, createComposeObject, setActiveTool],
+  );
 
   useActiveToolCleanup({
     activeTool,
@@ -2522,7 +2542,9 @@ function AppContent({
     openSubcomposition,
     reorderComposeObjects,
     updateComposeObject,
-    setComposeDrawTool: setActiveTool,
+    setComposeDrawTool: insertComposeDrawToolsImmediately
+      ? addComposeDrawObject
+      : setActiveTool,
     addComposeNullObject: composeDrawing.addNullObjectToFrameCenter,
     addComposeCamera: addCameraToActivePart,
     addComposeMediaObject: () => createComposeObject("media"),
@@ -2628,6 +2650,9 @@ function AppContent({
                     onAddMediaObject: () => createComposeObject("media"),
                     onAddCodeObject: () => createComposeObject("code"),
                     onAddSubcomposition: addSubcompositionToActivePart,
+                    onAddDrawObject: addComposeDrawObject,
+                    insertDrawToolsImmediately:
+                      insertComposeDrawToolsImmediately,
                     onActiveToolChange: setActiveTool,
                     activeCursorTool,
                     onCursorToolChange: setActiveCursorTool,

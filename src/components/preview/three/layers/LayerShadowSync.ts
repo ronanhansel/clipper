@@ -17,7 +17,7 @@ import {
   vec2,
   vec4,
 } from "three/tsl";
-import { evaluateObjectState } from "../../../../core/propertyRegistry";
+import type { EvaluatedObjectState } from "../../../../core/propertyRegistry";
 import { FRAME_HEIGHT, FRAME_WIDTH } from "../../../../core/types";
 import type {
   CompositionClip,
@@ -27,6 +27,10 @@ import type {
 import { resolveLayerTransform } from "./layerTransform";
 import type { LayerShadowState } from "./layerLighting";
 import { resolveLightTargetFromTransform } from "../lightObjectTransform";
+import {
+  hasTimeVaryingObjectState as hasPreviewTimeVaryingObjectState,
+  readPreviewObjectState,
+} from "../readPreviewObjectState";
 
 type ShadowLight = {
   id: string;
@@ -297,6 +301,17 @@ export class LayerShadowSync {
       .identity()
       .multiply(this.camera.projectionMatrix)
       .multiply(this.camera.matrixWorldInverse);
+    const objectDiagnostics = canReuseShadowMap
+      ? this.diagnostics.objects
+      : diagnoseObjects(
+          part,
+          localTime,
+          casterIds,
+          this.shadowMatrix,
+          this.camera.matrixWorldInverse,
+          this.camera.near,
+          this.camera.far,
+        );
     this.state = {
       active: true,
       texture: this.renderTarget.texture,
@@ -314,15 +329,7 @@ export class LayerShadowSync {
       light,
       casterIds: Array.from(casterIds),
       render: renderDiagnostics,
-      objects: diagnoseObjects(
-        part,
-        localTime,
-        casterIds,
-        this.shadowMatrix,
-        this.camera.matrixWorldInverse,
-        this.camera.near,
-        this.camera.far,
-      ),
+      objects: objectDiagnostics,
     };
     return this.state;
   }
@@ -856,7 +863,7 @@ function findShadowLight(
 ): ShadowLight | null {
   for (const object of part.objects) {
     if (object.type !== "light" || object.hidden) continue;
-    const state = evaluateObjectState(object, localTime);
+    const state = readShadowSignatureObjectState(object, localTime);
     const props = state.props ?? {};
     if (props.castShadow === false) continue;
     const kind = readLightKind(props.kind);
@@ -917,7 +924,7 @@ function buildShadowInputSignature(
   const casterState = part.objects
     .filter((object) => casterIds.has(object.id))
     .map((object) => {
-      const state = evaluateObjectState(object, localTime);
+      const state = readShadowSignatureObjectState(object, localTime);
       const transform = resolveLayerTransform(state);
       return {
         id: object.id,
@@ -945,6 +952,17 @@ function buildShadowInputSignature(
   });
 }
 
+export function hasTimeVaryingObjectState(object: FrameObject): boolean {
+  return hasPreviewTimeVaryingObjectState(object);
+}
+
+export function readShadowSignatureObjectState(
+  object: FrameObject,
+  localTime: number,
+): EvaluatedObjectState {
+  return readPreviewObjectState(object, localTime);
+}
+
 function diagnoseObjects(
   part: CompositionClip,
   localTime: number,
@@ -957,7 +975,7 @@ function diagnoseObjects(
   return part.objects
     .filter((object) => object.type !== "camera" && object.type !== "light")
     .map((object) => {
-      const state = evaluateObjectState(object, localTime);
+      const state = readShadowSignatureObjectState(object, localTime);
       const transform = resolveLayerTransform(state);
       const world = new THREE.Vector3(
         transform.positionX,

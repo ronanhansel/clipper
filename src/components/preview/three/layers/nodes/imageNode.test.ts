@@ -169,10 +169,11 @@ describe("imageNodeFactory", () => {
       materialBackend: "webgpu-node",
     });
     node.update(makeState({ style: { src: "node-a.png", opacity: 1 } }));
-    const firstTexture = node.object3D.material.userData.layerTextureNode.value;
+    const material = node.object3D.material;
+    const firstTexture = material.userData.layerTextureNode.value;
     node.update(makeState({ style: { src: "node-b.png", opacity: 1 } }));
-    const secondTexture =
-      node.object3D.material.userData.layerTextureNode.value;
+    const secondTexture = material.userData.layerTextureNode.value;
+    expect(node.object3D.material).toBe(material);
     expect(secondTexture).toBeInstanceOf(THREE.Texture);
     expect(secondTexture).not.toBe(firstTexture);
     node.dispose();
@@ -232,6 +233,32 @@ describe("imageNodeFactory", () => {
     expect(secondTexture).toBeInstanceOf(THREE.Texture);
     expect(secondTexture).not.toBe(firstTexture);
     node.dispose();
+  });
+
+  it("does not renormalize unchanged file URLs on every update", () => {
+    const originalURL = globalThis.URL;
+    const node = imageNodeFactory.create(
+      { id: "image-1" } as FrameObject,
+      makeContext(),
+    );
+    const state = makeState({
+      style: { src: "file:///tmp/a.png", opacity: 1 },
+    });
+    node.update(state);
+    const firstTexture = node.object3D.material.uniforms.u_image.value;
+    globalThis.URL = class ThrowingURL extends originalURL {
+      constructor(url: string | URL, base?: string | URL) {
+        if (url === "file:///tmp/a.png") throw new Error("renormalized");
+        super(url, base);
+      }
+    } as typeof URL;
+    try {
+      expect(() => node.update(state)).not.toThrow();
+      expect(node.object3D.material.uniforms.u_image.value).toBe(firstTexture);
+    } finally {
+      globalThis.URL = originalURL;
+      node.dispose();
+    }
   });
 
   it("requests a render when an image texture finishes decoding", () => {

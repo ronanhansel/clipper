@@ -1,384 +1,200 @@
 import * as THREE from "three";
-import { Pass } from "three/examples/jsm/postprocessing/Pass.js";
+import { RenderPipeline } from "three/webgpu";
+import { Fn, mix, texture, uniform, uv } from "three/tsl";
 import {
   CAMERA_DOF_MAX_BLUR_PX,
   CAMERA_DOF_MIN_F_NUMBER,
   type CameraBokehPreset,
   type CameraObjectProps,
 } from "../../../core/types";
+import type { CompositionSceneInput } from "./CompositionSceneInput";
 
-const FULLSCREEN_GEOMETRY = new THREE.PlaneGeometry(2, 2);
-const FULLSCREEN_CAMERA = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
 const GOLDEN_ANGLE = 2.39996323;
-const THIN_LENS_SAMPLES = 64;
+export const THIN_LENS_SAMPLES = 64;
 const APERTURE_WORLD_SCALE = 0.02;
 const MIN_BLUR_CAP_DEPTH = 100;
-const RESOLVE_SCALE = 0.5;
-const RESOLVE_BOKEH_TAPS = 24;
-const RESOLVE_BOKEH_RADIUS_HALF_PX = 1.8;
-const RESOLVE_BOKEH_BLEND = 0.62;
-
-const COPY_VERTEX = `
-out vec2 v_uv;
-void main() {
-  v_uv = uv;
-  gl_Position = vec4(position.xy, 0.0, 1.0);
-}
-`;
-
-const ACCUMULATE_FRAGMENT = `
-precision highp float;
-in vec2 v_uv;
-out vec4 fragColor;
-uniform sampler2D u_previous;
-uniform sampler2D u_current;
-uniform float u_sampleIndex;
-
-void main() {
-  vec4 previous = texture(u_previous, v_uv);
-  vec4 current = texture(u_current, v_uv);
-  float amount = 1.0 / (u_sampleIndex + 1.0);
-  fragColor = mix(previous, current, amount);
-}
-`;
-
-const COPY_FRAGMENT = `
-precision highp float;
-in vec2 v_uv;
-out vec4 fragColor;
-uniform sampler2D u_texture;
-
-void main() {
-  fragColor = texture(u_texture, v_uv);
-}
-`;
-
-const BOKEH_FILL_FRAGMENT = `
-precision highp float;
-in vec2 v_uv;
-out vec4 fragColor;
-
-uniform sampler2D u_texture;
-uniform vec2 u_texelSize;
-uniform float u_radiusPx;
-
-const float GOLDEN_ANGLE = ${GOLDEN_ANGLE.toFixed(8)};
-const int TAP_COUNT = ${RESOLVE_BOKEH_TAPS};
-const float TAP_COUNT_F = float(TAP_COUNT);
-
-void main() {
-  vec4 center = texture(u_texture, v_uv);
-  vec4 color = center * 1.75;
-  float weight = 1.75;
-
-  for (int i = 0; i < TAP_COUNT; i++) {
-    float fi = float(i) + 0.5;
-    float r = sqrt(fi / TAP_COUNT_F);
-    float theta = fi * GOLDEN_ANGLE;
-    vec2 offset = vec2(cos(theta), sin(theta)) * r * u_radiusPx * u_texelSize;
-    float tapWeight = 1.0 - r * 0.35;
-    color += texture(u_texture, v_uv + offset) * tapWeight;
-    weight += tapWeight;
-  }
-
-  fragColor = color / weight;
-}
-`;
-
-const BOKEH_COMPOSITE_FRAGMENT = `
-precision highp float;
-in vec2 v_uv;
-out vec4 fragColor;
-
-uniform sampler2D u_sharp;
-uniform sampler2D u_fill;
-uniform float u_blend;
-
-void main() {
-  vec4 sharp = texture(u_sharp, v_uv);
-  vec4 fill = texture(u_fill, v_uv);
-  float contrast = clamp(length(sharp.rgb - fill.rgb) * 1.35, 0.0, 1.0);
-  float bandBlend = mix(u_blend * 0.45, u_blend, contrast);
-  fragColor = mix(sharp, fill, bandBlend);
-}
-`;
 
 type ThinLensRenderPassOptions = {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  renderer: any;
+  sceneInput: CompositionSceneInput;
   width: number;
   height: number;
-  getCamera: () => CameraObjectProps | null;
+  name: string;
 };
 
-/**
- * Render-pass DoF. Unlike post-process blur, this jitters the camera over
- * an aperture disk, keeps every sample aimed at the same focus point, and
- * averages the actual scene renders. It is still rasterized, but it asks
- * the physically relevant question: what does the scene look like through
- * different points on the lens?
- */
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-export class ThinLensRenderPass extends (Pass as any) {
-  readonly isRenderPass = true;
+export class ThinLensRenderPass {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  readonly outputNode: any;
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  private readonly scene: any;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  private readonly camera: any;
-  private readonly getCamera: () => CameraObjectProps | null;
-
+  private readonly renderer: any;
+  private readonly sceneInput: CompositionSceneInput;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   private readonly sampleTarget: any;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  private accumulationA: any;
+  private readonly accumulationA: any;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  private accumulationB: any;
+  private readonly accumulationB: any;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  private readonly resolveDownsampleTarget: any;
+  private readonly sampleWeight: any;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  private readonly resolveFillTarget: any;
+  private readonly accumulateAToBPipeline: any;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  private readonly accumulateBToAPipeline: any;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  private readonly copyBToAPipeline: any;
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  private readonly accumulateMaterial: any;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  private readonly downsampleMaterial: any;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  private readonly bokehFillMaterial: any;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  private readonly compositeMaterial: any;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  private readonly accumulateScene: any;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  private readonly downsampleScene: any;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  private readonly bokehFillScene: any;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  private readonly compositeScene: any;
-
-  constructor(
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    scene: any,
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    camera: any,
-    options: ThinLensRenderPassOptions,
-  ) {
-    super();
-    this.scene = scene;
-    this.camera = camera;
-    this.getCamera = options.getCamera;
-    this.needsSwap = false;
-    this.clear = true;
-
+  constructor(options: ThinLensRenderPassOptions) {
+    this.renderer = options.renderer;
+    this.sceneInput = options.sceneInput;
     this.sampleTarget = makeThinLensTarget(
       options.width,
       options.height,
-      "ThinLensSample",
+      `${options.name}:sample`,
       true,
     );
     this.accumulationA = makeThinLensTarget(
       options.width,
       options.height,
-      "ThinLensAccumA",
+      `${options.name}:accum-a`,
       false,
     );
     this.accumulationB = makeThinLensTarget(
       options.width,
       options.height,
-      "ThinLensAccumB",
+      `${options.name}:accum-b`,
       false,
     );
-    const resolveSize = getResolveSize(options.width, options.height);
-    this.resolveDownsampleTarget = makeThinLensTarget(
-      resolveSize.width,
-      resolveSize.height,
-      "ThinLensResolveDownsample",
-      false,
+    this.sampleWeight = uniform(1);
+    this.accumulateAToBPipeline = makePipeline(
+      this.renderer,
+      createAccumulateNode(
+        this.accumulationA.texture,
+        this.sampleTarget.texture,
+        this.sampleWeight,
+      ),
     );
-    this.resolveFillTarget = makeThinLensTarget(
-      resolveSize.width,
-      resolveSize.height,
-      "ThinLensResolveFill",
-      false,
+    this.accumulateBToAPipeline = makePipeline(
+      this.renderer,
+      createAccumulateNode(
+        this.accumulationB.texture,
+        this.sampleTarget.texture,
+        this.sampleWeight,
+      ),
     );
-
-    this.accumulateMaterial = new THREE.ShaderMaterial({
-      glslVersion: THREE.GLSL3,
-      vertexShader: COPY_VERTEX,
-      fragmentShader: ACCUMULATE_FRAGMENT,
-      uniforms: {
-        u_previous: { value: null },
-        u_current: { value: null },
-        u_sampleIndex: { value: 0 },
-      },
-      depthTest: false,
-      depthWrite: false,
-      transparent: false,
-    });
-    this.downsampleMaterial = new THREE.ShaderMaterial({
-      glslVersion: THREE.GLSL3,
-      vertexShader: COPY_VERTEX,
-      fragmentShader: COPY_FRAGMENT,
-      uniforms: {
-        u_texture: { value: null },
-      },
-      depthTest: false,
-      depthWrite: false,
-      transparent: false,
-    });
-    this.bokehFillMaterial = new THREE.ShaderMaterial({
-      glslVersion: THREE.GLSL3,
-      vertexShader: COPY_VERTEX,
-      fragmentShader: BOKEH_FILL_FRAGMENT,
-      uniforms: {
-        u_texture: { value: null },
-        u_texelSize: {
-          value: new THREE.Vector2(
-            1 / resolveSize.width,
-            1 / resolveSize.height,
-          ),
-        },
-        u_radiusPx: { value: getResolveBokehRadiusHalfPx() },
-      },
-      depthTest: false,
-      depthWrite: false,
-      transparent: false,
-    });
-    this.compositeMaterial = new THREE.ShaderMaterial({
-      glslVersion: THREE.GLSL3,
-      vertexShader: COPY_VERTEX,
-      fragmentShader: BOKEH_COMPOSITE_FRAGMENT,
-      uniforms: {
-        u_sharp: { value: null },
-        u_fill: { value: null },
-        u_blend: { value: RESOLVE_BOKEH_BLEND },
-      },
-      depthTest: false,
-      depthWrite: false,
-      transparent: false,
-    });
-    this.accumulateScene = makeFullscreenScene(this.accumulateMaterial);
-    this.downsampleScene = makeFullscreenScene(this.downsampleMaterial);
-    this.bokehFillScene = makeFullscreenScene(this.bokehFillMaterial);
-    this.compositeScene = makeFullscreenScene(this.compositeMaterial);
+    this.copyBToAPipeline = makePipeline(
+      this.renderer,
+      texture(this.accumulationB.texture),
+    );
+    this.outputNode = texture(this.accumulationA.texture);
   }
 
-  setSize(width: number, height: number): void {
-    const w = Math.max(1, Math.floor(width));
-    const h = Math.max(1, Math.floor(height));
-    this.sampleTarget.setSize(w, h);
-    this.accumulationA.setSize(w, h);
-    this.accumulationB.setSize(w, h);
-    const resolveSize = getResolveSize(w, h);
-    this.resolveDownsampleTarget.setSize(resolveSize.width, resolveSize.height);
-    this.resolveFillTarget.setSize(resolveSize.width, resolveSize.height);
-    this.bokehFillMaterial.uniforms.u_texelSize.value.set(
-      1 / resolveSize.width,
-      1 / resolveSize.height,
-    );
-  }
-
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  render(renderer: any, _writeBuffer: any, readBuffer: any): void {
-    const camera = this.getCamera();
-    if (!hasActiveThinLensDof(camera)) {
-      this.renderSingle(renderer, readBuffer);
-      return;
-    }
-
+  render(camera: CameraObjectProps): void {
     const apertureRadiusWorld = getThinLensApertureRadiusWorld(
       camera,
-      readBuffer?.height,
+      this.sampleTarget.height,
     );
+    const previousTarget = this.renderer.getRenderTarget?.() ?? null;
     if (apertureRadiusWorld <= 0) {
-      this.renderSingle(renderer, readBuffer);
+      this.renderSingleSample(previousTarget);
       return;
     }
 
-    const basePosition = this.camera.position.clone();
-    const baseQuaternion = this.camera.quaternion.clone();
+    const renderCamera = this.sceneInput.camera;
+    const basePosition = renderCamera.position.clone();
+    const baseQuaternion = renderCamera.quaternion.clone();
     const focusDistance = getThinLensFocusDistance(camera);
-    const focusPoint = getFocusPoint(this.camera, focusDistance);
-    const aperturePreset = camera.dof.bokeh.preset;
+    const focusPoint = getFocusPoint(renderCamera, focusDistance);
+    let accumulationIsA = true;
 
-    for (let i = 0; i < THIN_LENS_SAMPLES; i++) {
-      const sample = sampleAperture(i, THIN_LENS_SAMPLES, aperturePreset);
+    this.clearTarget(this.accumulationA);
+    this.clearTarget(this.accumulationB);
+
+    for (let i = 0; i < THIN_LENS_SAMPLES; i += 1) {
+      const sample = sampleThinLensAperture(
+        i,
+        THIN_LENS_SAMPLES,
+        camera.dof.bokeh.preset,
+      );
       applyThinLensSample(
-        this.camera,
+        renderCamera,
         basePosition,
         baseQuaternion,
         focusPoint,
         apertureRadiusWorld,
         sample,
       );
-
-      renderer.setRenderTarget(this.sampleTarget);
-      renderer.clear();
-      renderer.render(this.scene, this.camera);
-      this.accumulateSample(renderer, i);
+      this.sceneInput.syncBackgroundMeshToCamera();
+      this.renderSceneTo(this.sampleTarget);
+      this.sampleWeight.value = 1 / (i + 1);
+      if (accumulationIsA) {
+        this.renderPipelineTo(this.accumulateAToBPipeline, this.accumulationB);
+        accumulationIsA = false;
+      } else {
+        this.renderPipelineTo(this.accumulateBToAPipeline, this.accumulationA);
+        accumulationIsA = true;
+      }
     }
 
-    this.camera.position.copy(basePosition);
-    this.camera.quaternion.copy(baseQuaternion);
-    this.camera.updateMatrixWorld(true);
+    if (!accumulationIsA) {
+      this.renderPipelineTo(this.copyBToAPipeline, this.accumulationA);
+    }
 
-    this.downsampleMaterial.uniforms.u_texture.value =
-      this.accumulationA.texture;
-
-    renderer.setRenderTarget(this.resolveDownsampleTarget);
-    renderer.clear();
-    renderer.render(this.downsampleScene, FULLSCREEN_CAMERA);
-
-    this.bokehFillMaterial.uniforms.u_texture.value =
-      this.resolveDownsampleTarget.texture;
-    this.bokehFillMaterial.uniforms.u_radiusPx.value =
-      getResolveBokehRadiusHalfPx();
-
-    renderer.setRenderTarget(this.resolveFillTarget);
-    renderer.clear();
-    renderer.render(this.bokehFillScene, FULLSCREEN_CAMERA);
-
-    this.compositeMaterial.uniforms.u_sharp.value = this.accumulationA.texture;
-    this.compositeMaterial.uniforms.u_fill.value =
-      this.resolveFillTarget.texture;
-    this.compositeMaterial.uniforms.u_blend.value = RESOLVE_BOKEH_BLEND;
-
-    renderer.setRenderTarget(this.renderToScreen ? null : readBuffer);
-    renderer.clear();
-    renderer.render(this.compositeScene, FULLSCREEN_CAMERA);
+    renderCamera.position.copy(basePosition);
+    renderCamera.quaternion.copy(baseQuaternion);
+    renderCamera.updateMatrixWorld(true);
+    this.sceneInput.syncBackgroundMeshToCamera();
+    this.renderer.setRenderTarget(previousTarget);
   }
 
   dispose(): void {
     this.sampleTarget.dispose();
     this.accumulationA.dispose();
     this.accumulationB.dispose();
-    this.resolveDownsampleTarget.dispose();
-    this.resolveFillTarget.dispose();
-    this.accumulateMaterial.dispose();
-    this.downsampleMaterial.dispose();
-    this.bokehFillMaterial.dispose();
-    this.compositeMaterial.dispose();
+    this.accumulateAToBPipeline.dispose();
+    this.accumulateBToAPipeline.dispose();
+    this.copyBToAPipeline.dispose();
   }
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  private renderSingle(renderer: any, readBuffer: any): void {
-    renderer.setRenderTarget(this.renderToScreen ? null : readBuffer);
-    renderer.clear();
-    renderer.render(this.scene, this.camera);
+  private clearTarget(target: any): void {
+    this.renderer.setRenderTarget(target);
+    this.renderer.clear();
   }
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  private accumulateSample(renderer: any, sampleIndex: number): void {
-    this.accumulateMaterial.uniforms.u_previous.value =
-      this.accumulationA.texture;
-    this.accumulateMaterial.uniforms.u_current.value =
-      this.sampleTarget.texture;
-    this.accumulateMaterial.uniforms.u_sampleIndex.value = sampleIndex;
-    renderer.setRenderTarget(this.accumulationB);
-    renderer.clear();
-    renderer.render(this.accumulateScene, FULLSCREEN_CAMERA);
-    const previous = this.accumulationA;
-    this.accumulationA = this.accumulationB;
-    this.accumulationB = previous;
+  private renderSceneTo(target: any): void {
+    this.renderer.setRenderTarget(target);
+    this.renderer.clear();
+    this.renderer.render(this.sceneInput.scene, this.sceneInput.camera);
   }
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  private renderPipelineTo(pipeline: any, target: any): void {
+    this.renderer.setRenderTarget(target);
+    this.renderer.clear();
+    pipeline.render();
+  }
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  private renderSingleSample(previousTarget: any): void {
+    this.sceneInput.syncBackgroundMeshToCamera();
+    this.renderSceneTo(this.accumulationA);
+    this.renderer.setRenderTarget(previousTarget);
+  }
+}
+
+export function hasActiveThinLensDof(
+  camera: CameraObjectProps | null,
+): camera is CameraObjectProps {
+  return Boolean(
+    camera?.dof.enabled &&
+    camera.dof.fNumber > 0 &&
+    camera.dof.maxBlurPx > 0 &&
+    Number.isFinite(camera.dof.focusDistance) &&
+    camera.dof.focusDistance >= 0,
+  );
 }
 
 export function getThinLensApertureRadiusWorld(
@@ -404,7 +220,7 @@ export function getThinLensApertureRadiusWorld(
   return Math.max(0, Math.min(maxRadius, radius));
 }
 
-function getThinLensFocusDistance(camera: CameraObjectProps): number {
+export function getThinLensFocusDistance(camera: CameraObjectProps): number {
   const fovRad = (camera.fov * Math.PI) / 180;
   const focalLengthMm = getThinLensFocalLengthMm(camera, fovRad);
   const minDistance =
@@ -444,62 +260,7 @@ export function getThinLensMaxBlurRadiusWorld(
   return maxBlurPx / defocusPerWorldUnit;
 }
 
-function getResolveSize(
-  width: number,
-  height: number,
-): { width: number; height: number } {
-  return {
-    width: Math.max(1, Math.floor(width * RESOLVE_SCALE)),
-    height: Math.max(1, Math.floor(height * RESOLVE_SCALE)),
-  };
-}
-
-function getResolveBokehRadiusHalfPx(): number {
-  if (THIN_LENS_SAMPLES <= 8) return 2.1;
-  if (THIN_LENS_SAMPLES <= 12) return RESOLVE_BOKEH_RADIUS_HALF_PX;
-  if (THIN_LENS_SAMPLES <= 16) return 1.45;
-  if (THIN_LENS_SAMPLES <= 32) return 1.0;
-  return 0.65;
-}
-
-function hasActiveThinLensDof(
-  camera: CameraObjectProps | null,
-): camera is CameraObjectProps {
-  return Boolean(
-    camera?.dof.enabled &&
-    !camera.dof.debug &&
-    camera.dof.blurMode === "all" &&
-    camera.dof.fNumber > 0 &&
-    camera.dof.maxBlurPx > 0 &&
-    Number.isFinite(camera.dof.focusDistance) &&
-    camera.dof.focusDistance >= 0,
-  );
-}
-
-function sampleDisk(i: number, n: number): InstanceType<typeof THREE.Vector2> {
-  const r = Math.sqrt((i + 0.5) / n);
-  const theta = i * GOLDEN_ANGLE;
-  return new THREE.Vector2(Math.cos(theta) * r, Math.sin(theta) * r);
-}
-
 export function sampleThinLensAperture(
-  i: number,
-  n: number,
-  preset: CameraBokehPreset,
-): InstanceType<typeof THREE.Vector2> {
-  return sampleAperture(i, n, preset);
-}
-
-export function sampleThinLensDiskPair(
-  i: number,
-  n: number,
-): InstanceType<typeof THREE.Vector2> {
-  const pairIndex = Math.floor(i / 2);
-  const sample = sampleDisk(pairIndex, Math.max(1, Math.ceil(n / 2)));
-  return i % 2 === 0 ? sample : sample.multiplyScalar(-1);
-}
-
-function sampleAperture(
   i: number,
   n: number,
   preset: CameraBokehPreset,
@@ -522,31 +283,20 @@ function sampleAperture(
   return unit.multiplyScalar(r);
 }
 
-function polygonRadiusAt(theta: number, sides: number): number {
-  const sector = (Math.PI * 2) / sides;
-  const local = positiveModulo(theta + sector / 2, sector) - sector / 2;
-  return Math.cos(Math.PI / sides) / Math.cos(local);
+export function sampleThinLensDiskPair(
+  i: number,
+  n: number,
+): InstanceType<typeof THREE.Vector2> {
+  const pairIndex = Math.floor(i / 2);
+  const sample = sampleThinLensAperture(
+    pairIndex,
+    Math.max(1, Math.ceil(n / 2)),
+    "spherical",
+  );
+  return i % 2 === 0 ? sample : sample.multiplyScalar(-1);
 }
 
-function starRadiusAt(theta: number): number {
-  const lobe = Math.abs(Math.cos(theta * 5));
-  return 0.42 + Math.pow(lobe, 1.7) * 0.58;
-}
-
-function positiveModulo(value: number, divisor: number): number {
-  return ((value % divisor) + divisor) % divisor;
-}
-
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-function getFocusPoint(camera: any, focusDistance: number): any {
-  const focusPoint = new THREE.Vector3();
-  camera.getWorldDirection(focusPoint);
-  focusPoint.multiplyScalar(focusDistance);
-  focusPoint.add(camera.position);
-  return focusPoint;
-}
-
-function applyThinLensSample(
+export function applyThinLensSample(
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   camera: any,
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -592,13 +342,37 @@ export function orientThinLensSampleCamera(
   camera.quaternion.copy(swing.multiply(baseQuaternion));
 }
 
+function createAccumulateNode(
+  previousTexture: InstanceType<typeof THREE.Texture>,
+  currentTexture: InstanceType<typeof THREE.Texture>,
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  sampleWeight: any,
+) {
+  const previous = texture(previousTexture);
+  const current = texture(currentTexture);
+  return Fn(() =>
+    mix(previous.sample(uv()), current.sample(uv()), sampleWeight),
+  )();
+}
+
+function makePipeline(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  renderer: any,
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  outputNode: any,
+) {
+  const pipeline = new RenderPipeline(renderer, outputNode);
+  pipeline.outputColorTransform = false;
+  return pipeline;
+}
+
 function makeThinLensTarget(
   width: number,
   height: number,
   name: string,
   depthBuffer: boolean,
 ) {
-  const target = new THREE.WebGLRenderTarget(width, height, {
+  const target = new THREE.RenderTarget(width, height, {
     depthBuffer,
     type: THREE.HalfFloatType,
     format: THREE.RGBAFormat,
@@ -612,8 +386,25 @@ function makeThinLensTarget(
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-function makeFullscreenScene(material: any): any {
-  const scene = new THREE.Scene();
-  scene.add(new THREE.Mesh(FULLSCREEN_GEOMETRY, material));
-  return scene;
+function getFocusPoint(camera: any, focusDistance: number): any {
+  const focusPoint = new THREE.Vector3();
+  camera.getWorldDirection(focusPoint);
+  focusPoint.multiplyScalar(focusDistance);
+  focusPoint.add(camera.position);
+  return focusPoint;
+}
+
+function polygonRadiusAt(theta: number, sides: number): number {
+  const sector = (Math.PI * 2) / sides;
+  const local = positiveModulo(theta + sector / 2, sector) - sector / 2;
+  return Math.cos(Math.PI / sides) / Math.cos(local);
+}
+
+function starRadiusAt(theta: number): number {
+  const lobe = Math.abs(Math.cos(theta * 5));
+  return 0.42 + Math.pow(lobe, 1.7) * 0.58;
+}
+
+function positiveModulo(value: number, divisor: number): number {
+  return ((value % divisor) + divisor) % divisor;
 }

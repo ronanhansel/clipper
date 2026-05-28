@@ -88,9 +88,8 @@ export function applyGpuPostProcessUniforms(
   targetPasses: readonly PostProcessPass[],
   sourcePasses: readonly PostProcessPass[],
 ) {
-  const sourceById = new Map(sourcePasses.map((pass) => [pass.id, pass]));
   for (const pass of targetPasses) {
-    const sourcePass = sourceById.get(pass.id);
+    const sourcePass = findPostProcessPassById(sourcePasses, pass.id);
     if (!sourcePass) continue;
     const nodes = (pass as PostProcessPass & { gpuUniformNodes?: unknown })
       .gpuUniformNodes;
@@ -121,6 +120,16 @@ export function applyGpuPostProcessUniforms(
       ).uniforms.progress;
     }
   }
+}
+
+function findPostProcessPassById(
+  passes: readonly PostProcessPass[],
+  id: string,
+) {
+  for (const pass of passes) {
+    if (pass.id === id) return pass;
+  }
+  return null;
 }
 
 function getStablePostProcessUniformSignature(pass: PostProcessPass) {

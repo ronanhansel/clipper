@@ -13,6 +13,7 @@ import {
   type LightObjectKind,
 } from "../../../core/types";
 import { applyCompositionCameraToThree } from "./compositionCameraThree";
+import { getCameraObjectPropsSignature } from "./cameraObjectSignature";
 import {
   CameraPathOverlay,
   type CameraPathData,
@@ -260,6 +261,12 @@ function applyCameraObjectTransform(target: any, camera: CameraObjectProps) {
   target.rotation.z = -camera.rotation.z * DEG_TO_RAD;
 }
 
+export function getThreeAuthorActiveCameraSignature(
+  camera: CameraObjectProps | null,
+) {
+  return getCameraObjectPropsSignature(camera);
+}
+
 function findCameraVisualGroup(root: any, objectId: string) {
   return (
     root.children.find(
@@ -423,6 +430,7 @@ export class ThreeAuthorScene {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   private raycaster: any = new THREE.Raycaster();
   private activeProps: CameraObjectProps = { ...DEFAULT_CAMERA_OBJECT_PROPS };
+  private activeCameraSignature = getThreeAuthorActiveCameraSignature(null);
   private selectedCameraProps: CameraObjectProps = {
     ...DEFAULT_CAMERA_OBJECT_PROPS,
   };
@@ -940,10 +948,19 @@ export class ThreeAuthorScene {
   }
 
   setActiveCamera(camera: CameraObjectProps | null, objectId?: string | null) {
+    const nextObjectId = objectId ?? null;
+    const signature = getThreeAuthorActiveCameraSignature(camera);
+    if (
+      signature === this.activeCameraSignature &&
+      nextObjectId === this.activeCameraObjectId
+    ) {
+      return;
+    }
+    this.activeCameraSignature = signature;
     const visibleHelper = camera != null && this.viewMode === "orbit";
     this.cameraHelper.visible = visibleHelper;
     if (this.cameraBodyGroup) this.cameraBodyGroup.visible = false;
-    this.activeCameraObjectId = objectId ?? null;
+    this.activeCameraObjectId = nextObjectId;
     if (camera) {
       this.activeProps = { ...camera };
       applyCompositionCameraToThree(

@@ -425,7 +425,15 @@ export function useFrameInteractionController(
     const screenPxPerFrameUnit = getScreenPxPerFrameUnit();
     const dx = `${delta.x * screenPxPerFrameUnit}px`;
     const dy = `${delta.y * screenPxPerFrameUnit}px`;
+    const active = Math.abs(delta.x) > 0.001 || Math.abs(delta.y) > 0.001;
     for (const element of getPortalOverlayElements()) {
+      if (!active) {
+        delete element.dataset.clipperDragPreviewActive;
+        element.style.removeProperty("--clipper-drag-x");
+        element.style.removeProperty("--clipper-drag-y");
+        continue;
+      }
+      element.dataset.clipperDragPreviewActive = "true";
       element.style.setProperty("--clipper-drag-x", dx);
       element.style.setProperty("--clipper-drag-y", dy);
     }
@@ -433,6 +441,7 @@ export function useFrameInteractionController(
 
   function clearFrameSelectionBoxDragTransform() {
     for (const element of getPortalOverlayElements()) {
+      delete element.dataset.clipperDragPreviewActive;
       element.style.removeProperty("--clipper-drag-x");
       element.style.removeProperty("--clipper-drag-y");
     }
@@ -1279,6 +1288,7 @@ export function useFrameInteractionController(
     };
     objectDragRef.current = nextDrag;
     objectDragDeltaRef.current = { x: 0, y: 0 };
+    clearFrameSelectionBoxResizePreview();
     for (const item of nextSelectionObjects)
       setObjectDragTransform(item.id, { x: 0, y: 0 });
   }

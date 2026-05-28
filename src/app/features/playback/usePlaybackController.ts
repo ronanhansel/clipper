@@ -228,34 +228,44 @@ export function usePlaybackController({
         );
     const timelineTime = useLocalPlaybackLabels ? time - playbackStart : time;
     if (playbackPlayheadRef.current)
-      playbackPlayheadRef.current.style.setProperty(
+      setStylePropertyIfChanged(
+        playbackPlayheadRef.current.style,
         "--clipper-playhead-left",
         `${displayDuration > 0 ? (timelineTime / displayDuration) * 100 : 0}%`,
       );
     if (playbackPlayheadRef.current)
-      playbackPlayheadRef.current.style.removeProperty("--clipper-playhead-x");
+      removeStylePropertyIfPresent(
+        playbackPlayheadRef.current.style,
+        "--clipper-playhead-x",
+      );
     if (playbackTimeLabelRef.current)
-      playbackTimeLabelRef.current.textContent = formatPlaybackTimeLabel(time);
+      setTextContentIfChanged(
+        playbackTimeLabelRef.current,
+        formatPlaybackTimeLabel(time),
+      );
     if (playbackBorderScrubberRef.current) {
       const displayTime = toPlaybackDisplayTime(time);
       const displayPlaybackDuration = getPlaybackDisplayDuration();
+      const clampedDisplayTime = clamp(displayTime, 0, displayPlaybackDuration);
       const progress =
         displayPlaybackDuration > 0
           ? `${clamp(displayTime / displayPlaybackDuration, 0, 1) * 100}%`
           : "0%";
-      playbackBorderScrubberRef.current.max = String(
-        Math.max(displayPlaybackDuration, 0.001),
-      );
-      playbackBorderScrubberRef.current.value = String(
-        clamp(displayTime, 0, displayPlaybackDuration),
-      );
-      playbackBorderScrubberRef.current.style.setProperty(
+      const max = String(Math.max(displayPlaybackDuration, 0.001));
+      const value = String(clampedDisplayTime);
+      if (playbackBorderScrubberRef.current.max !== max)
+        playbackBorderScrubberRef.current.max = max;
+      if (playbackBorderScrubberRef.current.value !== value)
+        playbackBorderScrubberRef.current.value = value;
+      setStylePropertyIfChanged(
+        playbackBorderScrubberRef.current.style,
         "--clipper-playback-progress",
         progress,
       );
-      playbackBorderScrubberRef.current.setAttribute(
+      setDomAttributeIfChanged(
+        playbackBorderScrubberRef.current,
         "aria-valuenow",
-        String(clamp(displayTime, 0, displayPlaybackDuration)),
+        value,
       );
     }
   }
@@ -813,10 +823,10 @@ export function syncRenderClockLayersToSceneTime(
     };
     const attrs = getRenderClockAttributes(state);
     for (const [key, value] of Object.entries(attrs))
-      layer.setAttribute(key, value);
+      setDomAttributeIfChanged(layer, key, value);
     const style = getRenderClockStyle(state);
     for (const [key, value] of Object.entries(style))
-      layer.style.setProperty(key, String(value));
+      setStylePropertyIfChanged(layer.style, key, String(value));
     if (syncAnimations && shouldSyncRenderClockAnimations(layer, state))
       syncDomAnimationsToRenderClock(layer, state);
     synced += 1;
@@ -830,6 +840,41 @@ const renderClockLayerState = new WeakMap<
 >();
 const renderClockPlaybackJumpToleranceMs = 40;
 const timelineScrubAnimationSyncIntervalMs = 1000 / 30;
+
+export function setDomAttributeIfChanged(
+  element: Element,
+  name: string,
+  value: string,
+): boolean {
+  if (element.getAttribute(name) === value) return false;
+  element.setAttribute(name, value);
+  return true;
+}
+
+export function setStylePropertyIfChanged(
+  style: CSSStyleDeclaration,
+  name: string,
+  value: string,
+): boolean {
+  if (style.getPropertyValue(name) === value) return false;
+  style.setProperty(name, value);
+  return true;
+}
+
+export function removeStylePropertyIfPresent(
+  style: CSSStyleDeclaration,
+  name: string,
+): boolean {
+  if (!style.getPropertyValue(name)) return false;
+  style.removeProperty(name);
+  return true;
+}
+
+export function setTextContentIfChanged(node: Node, value: string): boolean {
+  if (node.textContent === value) return false;
+  node.textContent = value;
+  return true;
+}
 
 function shouldSyncRenderClockAnimations(
   layer: HTMLElement,

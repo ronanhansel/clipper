@@ -94,6 +94,50 @@ type DrawElementImageContext = CanvasRenderingContext2D & {
 
 type CaptureDrawResult = "drawn" | "retry" | "deferred";
 
+type CapturePaddingDeps = {
+  kind: FrameObjectType | "default";
+  content: unknown;
+  width: unknown;
+  fontSize: unknown;
+  fontWeight: unknown;
+  fontStyle: unknown;
+  fontFamily: unknown;
+  letterSpacing: unknown;
+  strokeEnabled: unknown;
+  strokeWidth: unknown;
+};
+
+type CaptureKeyDeps = {
+  kind: FrameObjectType | "default";
+  width: unknown;
+  height: unknown;
+  content: unknown;
+  props: unknown;
+  background: unknown;
+  backgroundColor: unknown;
+  border: unknown;
+  borderRadius: unknown;
+  color: unknown;
+  fontFamily: unknown;
+  fontSize: unknown;
+  fontSource: unknown;
+  fontStyle: unknown;
+  fontWeight: unknown;
+  letterSpacing: unknown;
+  lineHeight: unknown;
+  textAlign: unknown;
+  textBoxLayout: unknown;
+};
+
+type CaptureLayoutDeps = {
+  width: number;
+  height: number;
+  padding: number;
+  captureKey: string;
+  textBoxLayout: string;
+  hasActiveShadow: boolean;
+};
+
 function createPerElementCaptureUniforms(image: unknown, alphaCutoff: number) {
   return {
     u_image: { value: image },
@@ -188,6 +232,21 @@ function syncPerElementCaptureNodeUniforms(
   nodes.u_alphaCutoff.value = uniforms.u_alphaCutoff.value;
 }
 
+function setPerElementCaptureMaterialTexture(
+  material: {
+    uniforms?: PerElementCaptureUniforms;
+    userData?: Record<string, any>;
+  },
+  texture: unknown,
+): void {
+  const uniforms = getPerElementCaptureUniforms(material);
+  uniforms.u_image.value = texture;
+  const node = material.userData?.layerTextureNode;
+  if (node && typeof node === "object" && "value" in node) {
+    node.value = texture;
+  }
+}
+
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function configureCaptureTexture(texture: any): void {
   texture.flipY = true;
@@ -212,6 +271,7 @@ class PerElementCaptureNode implements LayerNode {
   private readonly canvas: HTMLCanvasElement;
   private readonly ctx: CanvasRenderingContext2D;
   private readonly id: string;
+  private readonly layerSelector: string;
   private readonly kind: FrameObjectType | "default";
   private readonly context: LayerNodeContext;
   private width = 1;
@@ -228,6 +288,19 @@ class PerElementCaptureNode implements LayerNode {
   private warnedMissing = false;
   private readonly videoFrameCache = new Map<number, HTMLCanvasElement>();
   private captureCount = 0;
+  private codeDomObservedEl: Element | null = null;
+  private codeDomObserver: MutationObserver | null = null;
+  private codeDomRevision = 0;
+  private layoutObservedEl: Element | null = null;
+  private layoutObserver: ResizeObserver | null = null;
+  private layoutRevision = 0;
+  private layoutRevisionAtRead = -1;
+  private captureLayoutDeps: CaptureLayoutDeps | null = null;
+  private capturePaddingCache: {
+    deps: CapturePaddingDeps;
+    padding: number;
+  } | null = null;
+  private captureKeyCache: { deps: CaptureKeyDeps; key: string } | null = null;
 
   constructor(
     id: string,
@@ -235,6 +308,7 @@ class PerElementCaptureNode implements LayerNode {
     context: LayerNodeContext,
   ) {
     this.id = id;
+    this.layerSelector = `[data-clipper-render-object-id="${cssEscape(id)}"]`;
     this.kind = kind;
     this.context = context;
     this.canvas = document.createElement("canvas");
@@ -275,35 +349,56 @@ class PerElementCaptureNode implements LayerNode {
       this.height = t.height;
     }
 
-    let layoutWidth = t.width;
-    let layoutHeight = t.height;
-    const sourceRoot = this.context.sourceRoot();
-    const layerEl = sourceRoot?.querySelector(
-      `[data-clipper-render-object-id="${cssEscape(this.id)}"]`,
-    ) as HTMLElement | null;
+    const capturePadding = this.readCapturePadding(state);
+    const captureKey = this.readCaptureKey(state);
+    const textBoxLayout = String(state.style?.textBoxLayout ?? "fixed");
+    const hasActiveShadow = hasVisibleShadow(state.shadow);
+    const layoutDeps = getCaptureLayoutDeps(
+      t.width,
+      t.height,
+      capturePadding,
+      captureKey,
+      textBoxLayout,
+      hasActiveShadow,
+    );
 
-    if (layerEl) {
-      const textBoxLayout = String(state.style?.textBoxLayout ?? "fixed");
-      const hasActiveShadow = hasVisibleShadow(state.shadow);
-      const isClipped = textBoxLayout === "fixed" && !hasActiveShadow;
+    let layoutWidth = this.layoutWidth;
+    let layoutHeight = this.layoutHeight;
+    let layerEl: HTMLElement | null = null;
+    if (!this.canReuseSettledLayout(layoutDeps, captureKey)) {
+      layoutWidth = t.width;
+      layoutHeight = t.height;
+      const sourceRoot = this.context.sourceRoot();
+      layerEl = sourceRoot
+        ? (sourceRoot.querySelector(this.layerSelector) as HTMLElement | null)
+        : null;
 
-      if (isClipped) {
-        layoutWidth = layerEl.offsetWidth || t.width;
-        layoutHeight = layerEl.offsetHeight || t.height;
-      } else {
-        layoutWidth =
-          Math.max(layerEl.offsetWidth || 0, layerEl.scrollWidth || 0) ||
-          t.width;
-        layoutHeight =
-          Math.max(layerEl.offsetHeight || 0, layerEl.scrollHeight || 0) ||
-          t.height;
+      if (layerEl) {
+        this.observeCaptureLayout(layerEl);
+        this.captureLayoutDeps = layoutDeps;
+        this.layoutRevisionAtRead = this.layoutRevision;
+      }
+
+      if (layerEl) {
+        const isClipped = textBoxLayout === "fixed" && !hasActiveShadow;
+
+        if (isClipped) {
+          layoutWidth = layerEl.offsetWidth || t.width;
+          layoutHeight = layerEl.offsetHeight || t.height;
+        } else {
+          layoutWidth =
+            Math.max(layerEl.offsetWidth || 0, layerEl.scrollWidth || 0) ||
+            t.width;
+          layoutHeight =
+            Math.max(layerEl.offsetHeight || 0, layerEl.scrollHeight || 0) ||
+            t.height;
+        }
       }
     }
 
     this.layoutWidth = layoutWidth;
     this.layoutHeight = layoutHeight;
 
-    const capturePadding = estimateCapturePadding(this.kind, state, this.ctx);
     const captureWidth = Math.max(
       1,
       Math.ceil(layoutWidth + capturePadding * 2),
@@ -333,6 +428,7 @@ class PerElementCaptureNode implements LayerNode {
       this.mesh.geometry = new THREE.PlaneGeometry(captureWidth, captureHeight);
       this.clearPendingCapture();
       this.captureCount = 0;
+      this.captureKeyCache = null;
     }
 
     this.mesh.position.set(t.positionX, t.positionY, t.positionZ);
@@ -351,30 +447,89 @@ class PerElementCaptureNode implements LayerNode {
       this.material,
       this.context.getLighting?.() ?? EMPTY_LAYER_LIGHTING,
     );
-    this.captureLayerPixels(createCaptureKey(this.kind, state), state);
+    this.captureLayerPixels(captureKey, state, layerEl);
+  }
+
+  private readCapturePadding(state: EvaluatedObjectState): number {
+    if (this.kind !== "text") return 0;
+    const deps = getCapturePaddingDeps(this.kind, state);
+    if (
+      this.capturePaddingCache &&
+      areCapturePaddingDepsEqual(this.capturePaddingCache.deps, deps)
+    ) {
+      return this.capturePaddingCache.padding;
+    }
+    const padding = estimateCapturePadding(this.kind, state, this.ctx);
+    this.capturePaddingCache = { deps, padding };
+    return padding;
+  }
+
+  private readCaptureKey(state: EvaluatedObjectState): string {
+    if (this.kind === "media") return createCaptureKey(this.kind, state);
+    const deps = getCaptureKeyDeps(this.kind, state);
+    if (
+      this.captureKeyCache &&
+      areCaptureKeyDepsEqual(this.captureKeyCache.deps, deps)
+    ) {
+      return this.captureKeyCache.key;
+    }
+    const key = createCaptureKey(this.kind, state);
+    this.captureKeyCache = { deps, key };
+    return key;
+  }
+
+  private canReuseSettledLayout(
+    layoutDeps: CaptureLayoutDeps,
+    captureKey: string,
+  ): boolean {
+    return (
+      this.layoutObserver !== null &&
+      this.layoutObservedEl !== null &&
+      this.captureLayoutDeps !== null &&
+      this.layoutRevisionAtRead === this.layoutRevision &&
+      areCaptureLayoutDepsEqual(this.captureLayoutDeps, layoutDeps) &&
+      this.canSkipCaptureDom(captureKey)
+    );
+  }
+
+  private canSkipCaptureDom(captureKey: string): boolean {
+    if (this.pendingCaptureEl || this.rasterFallbackInFlight) return false;
+    if (this.kind === "media" || this.captureCount < 5) return false;
+    if (this.kind === "code") {
+      if (!this.codeDomObservedEl || !this.codeDomObserver) return false;
+      return `${captureKey}:${this.codeDomRevision}` === this.lastCaptureKey;
+    }
+    return captureKey === this.lastCaptureKey;
+  }
+
+  private observeCaptureLayout(layerEl: Element): void {
+    if (this.layoutObservedEl === layerEl) return;
+    this.layoutObserver?.disconnect();
+    this.layoutObservedEl = layerEl;
+    this.layoutRevision += 1;
+    this.layoutRevisionAtRead = -1;
+    this.captureLayoutDeps = null;
+    this.layoutObserver = null;
+    const Observer = globalThis.ResizeObserver;
+    if (typeof Observer !== "function") return;
+    this.layoutObserver = new Observer(() => {
+      this.layoutRevision += 1;
+      this.layoutRevisionAtRead = -1;
+      this.captureLayoutDeps = null;
+      this.captureCount = 0;
+      this.context.requestRender();
+    });
+    this.layoutObserver.observe(layerEl);
   }
 
   private setCurrentMaterialTexture(texture: unknown): void {
-    if (this.context.materialBackend !== "webgpu-node") {
-      const uniforms = getPerElementCaptureUniforms(this.material);
-      uniforms.u_image.value = texture;
-      return;
-    }
-    const alphaCutoff =
-      this.kind === "text" ? TEXT_ALPHA_CUTOFF : DEFAULT_ALPHA_CUTOFF;
-    const previous = this.material;
-    this.material = createPerElementCaptureNodeMaterial(
-      texture,
-      alphaCutoff,
-      true,
-    );
-    this.mesh.material = this.material;
-    previous.dispose();
+    setPerElementCaptureMaterialTexture(this.material, texture);
   }
 
   private captureLayerPixels(
     captureKey: string,
     state: EvaluatedObjectState,
+    knownLayerEl?: Element | null,
   ): void {
     if (this.pendingCaptureEl && this.rasterFallbackInFlight) return;
     if (this.pendingCaptureEl) {
@@ -386,16 +541,17 @@ class PerElementCaptureNode implements LayerNode {
       }
     }
 
-    const sourceRoot = this.context.sourceRoot();
-    if (!sourceRoot) return;
-    const layerEl = sourceRoot.querySelector(
-      `[data-clipper-render-object-id="${cssEscape(this.id)}"]`,
-    );
+    if (this.canSkipCaptureDom(captureKey)) return;
+
+    const layerEl =
+      knownLayerEl === undefined
+        ? this.context.sourceRoot()?.querySelector(this.layerSelector)
+        : knownLayerEl;
     if (!layerEl) return;
 
     const effectiveCaptureKey =
       this.kind === "code"
-        ? `${captureKey}:${getCodeLayerDomSignature(layerEl)}`
+        ? `${captureKey}:${this.readCodeLayerDomSignature(layerEl)}`
         : captureKey;
 
     const isNewKey = effectiveCaptureKey !== this.lastCaptureKey;
@@ -485,6 +641,32 @@ class PerElementCaptureNode implements LayerNode {
     this.rasterFallbackInFlight = false;
   }
 
+  private readCodeLayerDomSignature(layerEl: Element): string {
+    if (this.codeDomObservedEl !== layerEl) {
+      this.codeDomObserver?.disconnect();
+      this.codeDomObservedEl = layerEl;
+      this.codeDomRevision += 1;
+      this.codeDomObserver = null;
+      const Observer = globalThis.MutationObserver;
+      if (typeof Observer === "function") {
+        this.codeDomObserver = new Observer(() => {
+          this.codeDomRevision += 1;
+          this.captureCount = 0;
+          this.context.requestRender();
+        });
+        this.codeDomObserver.observe(layerEl, {
+          attributes: true,
+          characterData: true,
+          childList: true,
+          subtree: true,
+        });
+      }
+    }
+    return this.codeDomObserver
+      ? String(this.codeDomRevision)
+      : getCodeLayerDomSignature(layerEl);
+  }
+
   private startForeignObjectRasterFallback(source: HTMLElement): void {
     if (this.rasterFallbackInFlight) return;
     this.rasterFallbackInFlight = true;
@@ -546,6 +728,12 @@ class PerElementCaptureNode implements LayerNode {
 
   dispose(): void {
     this.clearPendingCapture();
+    this.codeDomObserver?.disconnect();
+    this.codeDomObserver = null;
+    this.codeDomObservedEl = null;
+    this.layoutObserver?.disconnect();
+    this.layoutObserver = null;
+    this.layoutObservedEl = null;
     this.canvas.remove();
     this.mesh.geometry.dispose();
     this.material.dispose();
@@ -584,10 +772,8 @@ function cssEscape(value: string): string {
 }
 
 function getCodeLayerDomSignature(layerEl: Element): string {
-  const text = layerEl.textContent ?? "";
   return JSON.stringify({
     childCount: layerEl.childElementCount,
-    text,
   });
 }
 
@@ -773,6 +959,74 @@ function createForeignObjectDataUrl(
   return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
 }
 
+function getCapturePaddingDeps(
+  kind: FrameObjectType | "default",
+  state: EvaluatedObjectState,
+): CapturePaddingDeps {
+  return {
+    kind,
+    content: state.content,
+    width: state.bounds?.width,
+    fontSize: state.style?.fontSize,
+    fontWeight: state.style?.fontWeight,
+    fontStyle: state.style?.fontStyle,
+    fontFamily: state.style?.fontFamily,
+    letterSpacing: state.style?.letterSpacing,
+    strokeEnabled: state.stroke?.enabled,
+    strokeWidth: state.stroke?.width,
+  };
+}
+
+function areCapturePaddingDepsEqual(
+  a: CapturePaddingDeps,
+  b: CapturePaddingDeps,
+): boolean {
+  return (
+    Object.is(a.kind, b.kind) &&
+    Object.is(a.content, b.content) &&
+    Object.is(a.width, b.width) &&
+    Object.is(a.fontSize, b.fontSize) &&
+    Object.is(a.fontWeight, b.fontWeight) &&
+    Object.is(a.fontStyle, b.fontStyle) &&
+    Object.is(a.fontFamily, b.fontFamily) &&
+    Object.is(a.letterSpacing, b.letterSpacing) &&
+    Object.is(a.strokeEnabled, b.strokeEnabled) &&
+    Object.is(a.strokeWidth, b.strokeWidth)
+  );
+}
+
+function getCaptureLayoutDeps(
+  width: number,
+  height: number,
+  padding: number,
+  captureKey: string,
+  textBoxLayout: string,
+  hasActiveShadow: boolean,
+): CaptureLayoutDeps {
+  return {
+    width,
+    height,
+    padding,
+    captureKey,
+    textBoxLayout,
+    hasActiveShadow,
+  };
+}
+
+function areCaptureLayoutDepsEqual(
+  a: CaptureLayoutDeps,
+  b: CaptureLayoutDeps,
+): boolean {
+  return (
+    Object.is(a.width, b.width) &&
+    Object.is(a.height, b.height) &&
+    Object.is(a.padding, b.padding) &&
+    Object.is(a.captureKey, b.captureKey) &&
+    Object.is(a.textBoxLayout, b.textBoxLayout) &&
+    Object.is(a.hasActiveShadow, b.hasActiveShadow)
+  );
+}
+
 function estimateCapturePadding(
   kind: FrameObjectType | "default",
   state: EvaluatedObjectState,
@@ -832,6 +1086,57 @@ function estimateTextOverflowPadding(
       0,
     );
   return Math.max(0, longestLineWidth - width);
+}
+
+function getCaptureKeyDeps(
+  kind: FrameObjectType | "default",
+  state: EvaluatedObjectState,
+): CaptureKeyDeps {
+  return {
+    kind,
+    width: state.bounds?.width,
+    height: state.bounds?.height,
+    content: state.content,
+    props: state.props,
+    background: state.style?.background,
+    backgroundColor: state.style?.backgroundColor,
+    border: state.style?.border,
+    borderRadius: state.style?.borderRadius,
+    color: state.style?.color,
+    fontFamily: state.style?.fontFamily,
+    fontSize: state.style?.fontSize,
+    fontSource: state.style?.fontSource,
+    fontStyle: state.style?.fontStyle,
+    fontWeight: state.style?.fontWeight,
+    letterSpacing: state.style?.letterSpacing,
+    lineHeight: state.style?.lineHeight,
+    textAlign: state.style?.textAlign,
+    textBoxLayout: state.style?.textBoxLayout,
+  };
+}
+
+function areCaptureKeyDepsEqual(a: CaptureKeyDeps, b: CaptureKeyDeps): boolean {
+  return (
+    Object.is(a.kind, b.kind) &&
+    Object.is(a.width, b.width) &&
+    Object.is(a.height, b.height) &&
+    Object.is(a.content, b.content) &&
+    Object.is(a.props, b.props) &&
+    Object.is(a.background, b.background) &&
+    Object.is(a.backgroundColor, b.backgroundColor) &&
+    Object.is(a.border, b.border) &&
+    Object.is(a.borderRadius, b.borderRadius) &&
+    Object.is(a.color, b.color) &&
+    Object.is(a.fontFamily, b.fontFamily) &&
+    Object.is(a.fontSize, b.fontSize) &&
+    Object.is(a.fontSource, b.fontSource) &&
+    Object.is(a.fontStyle, b.fontStyle) &&
+    Object.is(a.fontWeight, b.fontWeight) &&
+    Object.is(a.letterSpacing, b.letterSpacing) &&
+    Object.is(a.lineHeight, b.lineHeight) &&
+    Object.is(a.textAlign, b.textAlign) &&
+    Object.is(a.textBoxLayout, b.textBoxLayout)
+  );
 }
 
 function createCaptureKey(

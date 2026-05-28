@@ -496,6 +496,77 @@ export function Bin({
     [compositionDurations],
   );
 
+  const handleTreeSelect = useCallback(() => {}, []);
+
+  const getTreeDropTarget = useCallback(
+    ({
+      dragIds,
+      localY,
+      tree: api,
+    }: {
+      dragIds: string[];
+      localY: number;
+      tree: NativeTreeApi<RegistryNode>;
+    }) => getOsFileDropTarget(api, dragIds, localY),
+    [],
+  );
+
+  const handleCompositionDragStart = useCallback(
+    (
+      node: RegistryNode,
+      mouse: { x: number; y: number },
+      shiftKey: boolean,
+    ) => {
+      externalCompositionDragRef.current = {
+        node,
+        lastMouse: mouse,
+        shiftKey,
+      };
+      const detail = getCompositionDragDetail(node, "move", mouse, shiftKey);
+      if (detail)
+        dispatchClipperPointerDrag(compositionPointerDragEvent, detail);
+    },
+    [getCompositionDragDetail],
+  );
+
+  const handleDragStateChange = useCallback((node: RegistryNode | null) => {
+    draggingNodeRef.current = node;
+  }, []);
+
+  const renderTreeDragPreview = useCallback(
+    (props: NativeTreeDragPreviewProps) => (
+      <OsFileDragPreview
+        {...props}
+        hideGhost={compositionLanePreviewActive}
+        nodes={treeData}
+        onDragPositionChange={updateRootDropPreview}
+      />
+    ),
+    [compositionLanePreviewActive, treeData, updateRootDropPreview],
+  );
+
+  const renderRegistryTreeNode = useCallback(
+    (props: NativeTreeNodeRendererProps<RegistryNode>) => (
+      <RegistryTreeNode
+        {...props}
+        bin={bin}
+        selectedCompositionId={selectedCompositionId}
+        onContextMenu={openContextMenu}
+        onCompositionDragStart={handleCompositionDragStart}
+        onDragStateChange={handleDragStateChange}
+        onDropFiles={dropFiles}
+      />
+    ),
+    [
+      bin,
+      dropFiles,
+      handleCompositionDragStart,
+      handleDragStateChange,
+      openContextMenu,
+      selectedCompositionId,
+    ],
+  );
+
   const cleanupCompositionDrag = useCallback(
     (phase: "cancel" | "drop" | null) => {
       const external = externalCompositionDragRef.current;
@@ -659,49 +730,11 @@ export function Bin({
           onActivate={handleActivate}
           onMove={handleMove}
           onRename={handleRename}
-          onSelect={() => {}}
-          getDropTarget={({ dragIds, localY, tree: api }) =>
-            getOsFileDropTarget(api, dragIds, localY)
-          }
-          renderDragPreview={(props) => (
-            <OsFileDragPreview
-              {...props}
-              hideGhost={compositionLanePreviewActive}
-              nodes={treeData}
-              onDragPositionChange={updateRootDropPreview}
-            />
-          )}
+          onSelect={handleTreeSelect}
+          getDropTarget={getTreeDropTarget}
+          renderDragPreview={renderTreeDragPreview}
         >
-          {(props) => (
-            <RegistryTreeNode
-              {...props}
-              bin={bin}
-              selectedCompositionId={selectedCompositionId}
-              onContextMenu={openContextMenu}
-              onCompositionDragStart={(node, mouse, shiftKey) => {
-                externalCompositionDragRef.current = {
-                  node,
-                  lastMouse: mouse,
-                  shiftKey,
-                };
-                const detail = getCompositionDragDetail(
-                  node,
-                  "move",
-                  mouse,
-                  shiftKey,
-                );
-                if (detail)
-                  dispatchClipperPointerDrag(
-                    compositionPointerDragEvent,
-                    detail,
-                  );
-              }}
-              onDragStateChange={(node) => {
-                draggingNodeRef.current = node;
-              }}
-              onDropFiles={dropFiles}
-            />
-          )}
+          {renderRegistryTreeNode}
         </NativeTree>
       </div>
       <AppContextMenu menu={contextMenu} onClose={() => setContextMenu(null)} />

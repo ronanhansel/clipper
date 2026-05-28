@@ -17,14 +17,23 @@ import {
   type CodeComponent,
 } from "../../render-engine/codeObjectRuntime";
 import { applySchemaDefaults } from "../../render-engine/codePropsSchema";
+import { useRawSceneTime } from "../../app/features/playback/playbackTimeStore";
 import { usePlayheadSceneTime } from "../../app/features/playback/usePlayheadTime";
 import type { FrameObject } from "../../core/types";
 
 type CodeObjectFrameProps = {
   object: FrameObject;
+  liveTimeEnabled?: boolean;
+  time?: number;
+  liveTimeOffset?: number;
 };
 
-export function CodeObjectFrame({ object }: CodeObjectFrameProps) {
+export function CodeObjectFrame({
+  object,
+  liveTimeEnabled = true,
+  time,
+  liveTimeOffset = 0,
+}: CodeObjectFrameProps) {
   const sourcePath =
     typeof object.props?.source === "string" ? object.props.source : null;
   const rawProps = useMemo(
@@ -55,7 +64,15 @@ export function CodeObjectFrame({ object }: CodeObjectFrameProps) {
     () => applySchemaDefaults(rawProps, schema),
     [rawProps, schema],
   );
-  const time = usePlayheadSceneTime(true);
+  const externalTime = useRawSceneTime(
+    shouldUseExternalClockForCodeObject(liveTimeEnabled, time),
+    time ?? 0,
+    liveTimeOffset,
+  );
+  const playheadTime = usePlayheadSceneTime(
+    shouldUsePlayheadClockForCodeObject(liveTimeEnabled, time),
+  );
+  const componentTime = time === undefined ? playheadTime : externalTime;
   const size = {
     width: object.bounds.width,
     height: object.bounds.height,
@@ -79,7 +96,7 @@ export function CodeObjectFrame({ object }: CodeObjectFrameProps) {
         {component ? (
           <CodeComponentHost
             component={component}
-            time={time}
+            time={componentTime}
             props={propsForComponent}
             size={size}
           />
@@ -89,6 +106,20 @@ export function CodeObjectFrame({ object }: CodeObjectFrameProps) {
       </CodeObjectErrorBoundary>
     </div>
   );
+}
+
+export function shouldUseExternalClockForCodeObject(
+  liveTimeEnabled: boolean,
+  time: number | undefined,
+) {
+  return liveTimeEnabled && time !== undefined;
+}
+
+export function shouldUsePlayheadClockForCodeObject(
+  liveTimeEnabled: boolean,
+  time: number | undefined,
+) {
+  return liveTimeEnabled && time === undefined;
 }
 
 function CodeComponentHost({
