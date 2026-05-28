@@ -9,17 +9,17 @@ import {
   type FrameObjectType,
 } from "../../../../../core/types";
 import type {
+  CaptureStatus,
   LayerNode,
   LayerNodeContext,
   LayerNodeFactory,
+  LayerNodeUpdateOptions,
 } from "../layerNodeRegistry";
 import { resolveLayerTransform } from "../layerTransform";
 import {
-  applyLayerLightingUniforms,
   createLayerLightingNodes,
   createLayerLightMultiplierNode,
   createLayerLightingUniforms,
-  EMPTY_LAYER_LIGHTING,
   LAYER_LIGHTING_FRAGMENT,
   LAYER_LIGHTING_VERTEX_BODY,
   LAYER_LIGHTING_VERTEX_VARYINGS,
@@ -268,6 +268,8 @@ class PerElementCaptureNode implements LayerNode {
   private material: any;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   private texture: any;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  private textureToDisposeAfterReady: any | null = null;
   private readonly canvas: HTMLCanvasElement;
   private readonly ctx: CanvasRenderingContext2D;
   private readonly id: string;
@@ -342,7 +344,10 @@ class PerElementCaptureNode implements LayerNode {
     this.object3D = this.mesh;
   }
 
-  update(state: EvaluatedObjectState): void {
+  update(
+    state: EvaluatedObjectState,
+    options?: LayerNodeUpdateOptions,
+  ): { captureStatus: CaptureStatus } {
     const t = resolveLayerTransform(state);
     if (t.width !== this.width || t.height !== this.height) {
       this.width = t.width;
@@ -422,8 +427,13 @@ class PerElementCaptureNode implements LayerNode {
       const previousTexture = this.texture;
       this.texture = new THREE.CanvasTexture(this.canvas);
       configureCaptureTexture(this.texture);
-      this.setCurrentMaterialTexture(this.texture);
-      previousTexture.dispose();
+      if (this.lastCaptureKey) {
+        this.textureToDisposeAfterReady?.dispose();
+        this.textureToDisposeAfterReady = previousTexture;
+      } else {
+        this.setCurrentMaterialTexture(this.texture);
+        previousTexture.dispose();
+      }
       this.mesh.geometry.dispose();
       this.mesh.geometry = new THREE.PlaneGeometry(captureWidth, captureHeight);
       this.clearPendingCapture();
@@ -443,11 +453,17 @@ class PerElementCaptureNode implements LayerNode {
     const uniforms = getPerElementCaptureUniforms(this.material);
     uniforms.u_opacity.value = clamp01(opacity);
     syncPerElementCaptureNodeUniforms(this.material, uniforms);
-    applyLayerLightingUniforms(
-      this.material,
-      this.context.getLighting?.() ?? EMPTY_LAYER_LIGHTING,
-    );
-    this.captureLayerPixels(captureKey, state, layerEl);
+    const isLiveFrame =
+      options?.isPlaying === true || options?.quality === "live";
+    const frameSensitive = isLiveFrame && isCaptureFrameSensitive(state);
+    return {
+      captureStatus: this.captureLayerPixels(
+        captureKey,
+        state,
+        layerEl,
+        frameSensitive,
+      ),
+    };
   }
 
   private readCapturePadding(state: EvaluatedObjectState): number {
@@ -492,8 +508,12 @@ class PerElementCaptureNode implements LayerNode {
     );
   }
 
-  private canSkipCaptureDom(captureKey: string): boolean {
+  private canSkipCaptureDom(
+    captureKey: string,
+    frameSensitive = false,
+  ): boolean {
     if (this.pendingCaptureEl || this.rasterFallbackInFlight) return false;
+    if (frameSensitive) return false;
     if (this.kind === "media" || this.captureCount < 5) return false;
     if (this.kind === "code") {
       if (!this.codeDomObservedEl || !this.codeDomObserver) return false;
@@ -530,24 +550,25 @@ class PerElementCaptureNode implements LayerNode {
     captureKey: string,
     state: EvaluatedObjectState,
     knownLayerEl?: Element | null,
-  ): void {
-    if (this.pendingCaptureEl && this.rasterFallbackInFlight) return;
+    frameSensitive = false,
+  ): CaptureStatus {
+    if (this.pendingCaptureEl && this.rasterFallbackInFlight) return "pending";
     if (this.pendingCaptureEl) {
       const result = this.drawPendingCapture();
-      if (result === "deferred") return;
+      if (result === "deferred") return "pending";
       if (result === "retry") {
         this.context.requestRender();
-        return;
+        return "pending";
       }
     }
 
-    if (this.canSkipCaptureDom(captureKey)) return;
+    if (this.canSkipCaptureDom(captureKey, frameSensitive)) return "ready";
 
     const layerEl =
       knownLayerEl === undefined
         ? this.context.sourceRoot()?.querySelector(this.layerSelector)
         : knownLayerEl;
-    if (!layerEl) return;
+    if (!layerEl) return "pending";
 
     const effectiveCaptureKey =
       this.kind === "code"
@@ -555,7 +576,9 @@ class PerElementCaptureNode implements LayerNode {
         : captureKey;
 
     const isNewKey = effectiveCaptureKey !== this.lastCaptureKey;
-    if (!isNewKey && this.captureCount >= 5) return;
+    if (!isNewKey && this.captureCount >= 5 && !frameSensitive) {
+      return "ready";
+    }
 
     if (isNewKey) {
       this.captureCount = 0;
@@ -563,7 +586,7 @@ class PerElementCaptureNode implements LayerNode {
 
     const captureCtx = this.ctx as DrawElementImageContext;
     const drawElementImage = captureCtx.drawElementImage;
-    if (typeof drawElementImage !== "function") return;
+    if (typeof drawElementImage !== "function") return "failed";
 
     const sharedCanvas = this.context.sharedCapture.canvas;
     const captureMount = sharedCanvas.parentElement ?? sharedCanvas;
@@ -589,7 +612,13 @@ class PerElementCaptureNode implements LayerNode {
     this.pendingCaptureKey = effectiveCaptureKey;
     this.canvas.appendChild(this.pendingCaptureEl);
     prepareLiveDomPostProcessSource(this.pendingCaptureEl, this.canvas);
+    if (frameSensitive) {
+      const result = this.drawPendingCapture();
+      if (result === "drawn") return "ready";
+      if (result === "deferred") return "pending";
+    }
     this.context.requestRender();
+    return "pending";
   }
 
   private drawPendingCapture(): CaptureDrawResult {
@@ -717,6 +746,9 @@ class PerElementCaptureNode implements LayerNode {
   private flushCaptureTexture(): void {
     if (this.context.materialBackend !== "webgpu-node") {
       this.texture.needsUpdate = true;
+      this.setCurrentMaterialTexture(this.texture);
+      this.textureToDisposeAfterReady?.dispose();
+      this.textureToDisposeAfterReady = null;
       return;
     }
     const previousTexture = this.texture;
@@ -724,6 +756,8 @@ class PerElementCaptureNode implements LayerNode {
     configureCaptureTexture(this.texture);
     this.setCurrentMaterialTexture(this.texture);
     previousTexture.dispose();
+    this.textureToDisposeAfterReady?.dispose();
+    this.textureToDisposeAfterReady = null;
   }
 
   dispose(): void {
@@ -738,6 +772,7 @@ class PerElementCaptureNode implements LayerNode {
     this.mesh.geometry.dispose();
     this.material.dispose();
     this.texture.dispose();
+    this.textureToDisposeAfterReady?.dispose();
     this.videoFrameCache.clear();
     this.canvas.width = 0;
     this.canvas.height = 0;
@@ -757,6 +792,14 @@ function clamp01(v: number): number {
   if (v < 0) return 0;
   if (v > 1) return 1;
   return v;
+}
+
+function isCaptureFrameSensitive(state: EvaluatedObjectState): boolean {
+  if (state.type === "media" || state.type === "code") return true;
+  if (Object.keys(state.tracks ?? {}).length > 0) return true;
+  return (
+    state.animations?.some((animation) => animation.enabled !== false) === true
+  );
 }
 
 function cssEscape(value: string): string {

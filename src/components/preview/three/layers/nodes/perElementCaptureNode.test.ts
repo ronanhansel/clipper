@@ -694,6 +694,82 @@ describe("perElementCaptureNode", () => {
     node.dispose();
   });
 
+  it("recaptures frame-sensitive text during live WebGPU frames after settling", () => {
+    const sharedCapture = makeFakeSharedCapture();
+    const root = new FakeElement();
+    const layer = new FakeElement();
+    layer.setAttribute("data-clipper-render-object-id", "layer-1");
+    root.appendChild(layer);
+    const factory = createPerElementCaptureFactory("text");
+    const node = factory.create({ id: "layer-1" } as FrameObject, {
+      sharedCapture:
+        sharedCapture as unknown as LayerNodeContext["sharedCapture"],
+      sourceRoot: () => root as unknown as Element,
+      requestRender: () => {},
+      materialBackend: "webgpu-node",
+    });
+    const animatedState = makeState({
+      tracks: {
+        "bounds.x": {
+          valueType: "number",
+          points: [
+            { time: 0, value: 0 },
+            { time: 1, value: 10 },
+          ],
+        },
+      },
+    } as Partial<EvaluatedObjectState>);
+    for (let i = 0; i < 6; i++) node.update(animatedState);
+    const drawElementImage = getNodeCaptureContext(sharedCapture)
+      .drawElementImage as ReturnType<typeof vi.fn>;
+    drawElementImage.mockClear();
+
+    const ready = node.update(animatedState, {
+      localTime: 0.5,
+      isPlaying: true,
+      quality: "live",
+    });
+    node.update(animatedState, {
+      localTime: 0.5,
+      isPlaying: true,
+      quality: "live",
+    });
+
+    expect(ready?.captureStatus).toBe("ready");
+    expect(drawElementImage).toHaveBeenCalledTimes(2);
+    node.dispose();
+  });
+
+  it("keeps the last valid WebGPU texture visible while resized capture is pending", () => {
+    const sharedCapture = makeFakeSharedCapture();
+    const root = new FakeElement();
+    const layer = new FakeElement();
+    layer.setAttribute("data-clipper-render-object-id", "layer-1");
+    root.appendChild(layer);
+    const factory = createPerElementCaptureFactory("text");
+    const node = factory.create({ id: "layer-1" } as FrameObject, {
+      sharedCapture:
+        sharedCapture as unknown as LayerNodeContext["sharedCapture"],
+      sourceRoot: () => root as unknown as Element,
+      requestRender: () => {},
+      materialBackend: "webgpu-node",
+    });
+    node.update(makeState({ bounds: { x: 0, y: 0, width: 50, height: 25 } }));
+    node.update(makeState({ bounds: { x: 0, y: 0, width: 50, height: 25 } }));
+    const displayedTexture =
+      node.object3D.material.userData.layerLightingUniforms.u_image.value;
+
+    const pending = node.update(
+      makeState({ bounds: { x: 0, y: 0, width: 120, height: 60 } }),
+    );
+
+    expect(pending?.captureStatus).toBe("pending");
+    expect(
+      node.object3D.material.userData.layerLightingUniforms.u_image.value,
+    ).toBe(displayedTexture);
+    node.dispose();
+  });
+
   it("does not recapture unchanged code pixels every update after settling", () => {
     const sharedCapture = makeFakeSharedCapture();
     const root = new FakeElement();

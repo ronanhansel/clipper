@@ -33,11 +33,15 @@ class FakeRaf {
 let fakeRaf: FakeRaf;
 let originalRaf: typeof globalThis.requestAnimationFrame;
 let originalCancel: typeof globalThis.cancelAnimationFrame;
+let originalSetTimeout: typeof globalThis.setTimeout;
+let originalClearTimeout: typeof globalThis.clearTimeout;
 
 beforeEach(() => {
   fakeRaf = new FakeRaf();
   originalRaf = globalThis.requestAnimationFrame;
   originalCancel = globalThis.cancelAnimationFrame;
+  originalSetTimeout = globalThis.setTimeout;
+  originalClearTimeout = globalThis.clearTimeout;
   globalThis.requestAnimationFrame =
     fakeRaf.request as unknown as typeof requestAnimationFrame;
   globalThis.cancelAnimationFrame =
@@ -45,9 +49,34 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  vi.useRealTimers();
   globalThis.requestAnimationFrame = originalRaf;
   globalThis.cancelAnimationFrame = originalCancel;
+  globalThis.setTimeout = originalSetTimeout;
+  globalThis.clearTimeout = originalClearTimeout;
 });
+
+function useFakeTimeouts() {
+  let nextId = 1;
+  const pending = new Map<number, () => void>();
+  globalThis.setTimeout = ((callback: TimerHandler) => {
+    const id = nextId++;
+    pending.set(id, () => {
+      if (typeof callback === "function") callback();
+    });
+    return id;
+  }) as typeof setTimeout;
+  globalThis.clearTimeout = ((id?: number) => {
+    if (typeof id === "number") pending.delete(id);
+  }) as typeof clearTimeout;
+  return {
+    flush() {
+      const ready = [...pending];
+      pending.clear();
+      for (const [, callback] of ready) callback();
+    },
+  };
+}
 
 describe("PreviewRenderScheduler", () => {
   it("idle: does not fire without requestRender", () => {
@@ -76,6 +105,95 @@ describe("PreviewRenderScheduler", () => {
     fakeRaf.advance(16.67);
     expect(handler).toHaveBeenCalledTimes(1);
     expect(handler.mock.calls[0]?.[0]).toBe("scrub");
+  });
+
+  it("idle scrub: caps repeated requests to project fps", () => {
+    const scheduler = createPreviewRenderScheduler({
+      fps: 30,
+      isPlaying: false,
+    });
+    const handler = vi.fn();
+    scheduler.subscribe(handler);
+
+    for (let i = 0; i < 6; i += 1) {
+      scheduler.requestRender("scrub");
+      fakeRaf.advance(16.67);
+    }
+
+    expect(handler).toHaveBeenCalledTimes(3);
+    for (const call of handler.mock.calls) expect(call[0]).toBe("scrub");
+  });
+
+  it("idle scrub: coalesces requests while waiting for the next allowed frame", () => {
+    const scheduler = createPreviewRenderScheduler({
+      fps: 30,
+      isPlaying: false,
+    });
+    const handler = vi.fn();
+    scheduler.subscribe(handler);
+
+    scheduler.requestRender("scrub");
+    fakeRaf.advance(16.67);
+    scheduler.requestRender("scrub");
+    scheduler.requestRender("scrub");
+    fakeRaf.advance(16.67);
+    expect(handler).toHaveBeenCalledTimes(1);
+    fakeRaf.advance(16.67);
+    expect(handler).toHaveBeenCalledTimes(2);
+  });
+
+  it("idle edit: still fires on the next frame", () => {
+    const scheduler = createPreviewRenderScheduler({
+      fps: 30,
+      isPlaying: false,
+    });
+    const handler = vi.fn();
+    scheduler.subscribe(handler);
+
+    scheduler.requestRender("edit");
+    fakeRaf.advance(16.67);
+
+    expect(handler).toHaveBeenCalledTimes(1);
+    expect(handler.mock.calls[0]?.[0]).toBe("edit");
+  });
+
+  it("idle post-paint scrub: records the pending render before paint", () => {
+    const timers = useFakeTimeouts();
+    const scheduler = createPreviewRenderScheduler({
+      fps: 30,
+      isPlaying: false,
+    });
+    const handler = vi.fn();
+    scheduler.subscribe(handler);
+
+    scheduler.requestPostPaintRender("scrub");
+    fakeRaf.advance(16.67);
+    expect(handler).not.toHaveBeenCalled();
+    timers.flush();
+
+    expect(handler).toHaveBeenCalledTimes(1);
+    expect(handler.mock.calls[0]?.[0]).toBe("scrub");
+  });
+
+  it("idle post-paint scrub: remains capped to project fps", () => {
+    const timers = useFakeTimeouts();
+    const scheduler = createPreviewRenderScheduler({
+      fps: 30,
+      isPlaying: false,
+    });
+    const handler = vi.fn();
+    scheduler.subscribe(handler);
+
+    scheduler.requestPostPaintRender("scrub");
+    fakeRaf.advance(16.67);
+    timers.flush();
+    scheduler.requestPostPaintRender("scrub");
+    fakeRaf.advance(16.67);
+    timers.flush();
+
+    expect(handler).toHaveBeenCalledTimes(1);
+    fakeRaf.advance(16.67);
+    expect(handler).toHaveBeenCalledTimes(2);
   });
 
   it("idle: two requestRenders in the same tick coalesce into one fire", () => {
@@ -163,6 +281,41 @@ describe("PreviewRenderScheduler", () => {
     fakeRaf.advance(16.67);
     fakeRaf.advance(16.67);
     expect(handler).toHaveBeenCalledTimes(2);
+  });
+
+  it("toggling isPlaying false → true cancels a pending idle scrub", () => {
+    const scheduler = createPreviewRenderScheduler({
+      fps: 30,
+      isPlaying: false,
+    });
+    const handler = vi.fn();
+    scheduler.subscribe(handler);
+
+    scheduler.requestRender("scrub");
+    scheduler.setOptions({ fps: 30, isPlaying: true });
+    fakeRaf.advance(16.67);
+
+    expect(handler).toHaveBeenCalledTimes(1);
+    expect(handler.mock.calls[0]?.[0]).toBe("play-tick");
+  });
+
+  it("toggling isPlaying false → true cancels a pending post-paint scrub", () => {
+    const timers = useFakeTimeouts();
+    const scheduler = createPreviewRenderScheduler({
+      fps: 30,
+      isPlaying: false,
+    });
+    const handler = vi.fn();
+    scheduler.subscribe(handler);
+
+    scheduler.requestPostPaintRender("scrub");
+    fakeRaf.advance(16.67);
+    scheduler.setOptions({ fps: 30, isPlaying: true });
+    timers.flush();
+    fakeRaf.advance(16.67);
+
+    expect(handler).toHaveBeenCalledTimes(1);
+    expect(handler.mock.calls[0]?.[0]).toBe("play-tick");
   });
 
   it("toggling isPlaying true → false stops the loop without duplicated frames", () => {

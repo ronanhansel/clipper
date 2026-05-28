@@ -33,11 +33,9 @@ import type {
 } from "../layerNodeRegistry";
 import { resolveLayerTransform } from "../layerTransform";
 import {
-  applyLayerLightingUniforms,
   createLayerLightingNodes,
   createLayerLightMultiplierNode,
   createLayerLightingUniforms,
-  EMPTY_LAYER_LIGHTING,
   LAYER_LIGHTING_FRAGMENT,
   LAYER_LIGHTING_VERTEX_BODY,
   LAYER_LIGHTING_VERTEX_VARYINGS,
@@ -513,11 +511,9 @@ class ImageNode implements LayerNode {
   private height = 1;
 
   private readonly requestRender: () => void;
-  private readonly context: LayerNodeContext;
 
   constructor(id: string, context: LayerNodeContext) {
     this.requestRender = context.requestRender;
-    this.context = context;
     this.placeholder = acquireImageTexture(MEDIA_PLACEHOLDER_DATA_URL);
     this.material =
       context.materialBackend === "webgpu-node"
@@ -643,10 +639,6 @@ class ImageNode implements LayerNode {
         : 0;
     u.u_radius.value = Math.max(0, radius);
     syncImageNodeUniforms(this.material, u);
-    applyLayerLightingUniforms(
-      this.material,
-      this.context.getLighting?.() ?? EMPTY_LAYER_LIGHTING,
-    );
   }
 
   dispose(): void {

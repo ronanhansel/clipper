@@ -16,11 +16,9 @@ import type {
 } from "../layerNodeRegistry";
 import { resolveLayerTransform } from "../layerTransform";
 import {
-  applyLayerLightingUniforms,
   createLayerLightingNodes,
   createLayerLightMultiplierNode,
   createLayerLightingUniforms,
-  EMPTY_LAYER_LIGHTING,
   LAYER_LIGHTING_FRAGMENT,
   LAYER_LIGHTING_VERTEX_BODY,
   LAYER_LIGHTING_VERTEX_VARYINGS,
@@ -206,7 +204,6 @@ class SvgNode implements LayerNode {
     }
 
     if (this.parsed) this.applyFitTransform(t.width, t.height);
-    this.applyLighting();
   }
 
   private requestLoad(src: string): void {
@@ -216,7 +213,6 @@ class SvgNode implements LayerNode {
         this.parsed = parsed;
         this.rebuildMeshes(parsed);
         this.applyOpacity();
-        this.applyLighting();
         this.context?.requestRender?.();
       })
       .catch((error) => {
@@ -319,13 +315,6 @@ class SvgNode implements LayerNode {
       entry.material.transparent = transparent;
       entry.material.depthWrite = depthWrite;
       if (needsUpdate) entry.material.needsUpdate = true;
-    }
-  }
-
-  private applyLighting(): void {
-    const lighting = this.context?.getLighting?.() ?? EMPTY_LAYER_LIGHTING;
-    for (const entry of this.materialEntries) {
-      applyLayerLightingUniforms(entry.material, lighting);
     }
   }
 

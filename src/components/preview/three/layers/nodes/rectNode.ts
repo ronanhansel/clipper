@@ -27,11 +27,9 @@ import {
   type LinearRgba,
 } from "../color/parseCssColor";
 import {
-  applyLayerLightingUniforms,
   createLayerLightingNodes,
   createLayerLightMultiplierNode,
   createLayerLightingUniforms,
-  EMPTY_LAYER_LIGHTING,
   LAYER_LIGHTING_FRAGMENT,
   LAYER_LIGHTING_VERTEX_BODY,
   LAYER_LIGHTING_VERTEX_VARYINGS,
@@ -90,12 +88,10 @@ class RectNode implements LayerNode {
   private readonly mesh: any;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   private readonly material: any;
-  private readonly context: LayerNodeContext;
   private width = 1;
   private height = 1;
 
   constructor(id: string, context: LayerNodeContext) {
-    this.context = context;
     this.material =
       context.materialBackend === "webgpu-node"
         ? createRectNodeMaterial()
@@ -147,10 +143,6 @@ class RectNode implements LayerNode {
         : 0;
     u.u_radius.value = Math.max(0, radius);
     syncRectNodeUniforms(this.material, u);
-    applyLayerLightingUniforms(
-      this.material,
-      this.context.getLighting?.() ?? EMPTY_LAYER_LIGHTING,
-    );
   }
 
   dispose(): void {

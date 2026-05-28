@@ -2,11 +2,13 @@ import { describe, expect, it, beforeEach } from "vitest";
 import * as THREE from "three";
 import { LayerNodeSync } from "./LayerNodeSync";
 import {
+  applyLayerLightingUniforms,
   createLayerLightingNodes,
   createLayerLightingUniforms,
   type LayerShadowState,
 } from "./layerLighting";
 import {
+  type CaptureStatus,
   clearLayerNodeRegistry,
   registerLayerNodeFactory,
   type LayerNode,
@@ -93,6 +95,21 @@ class MaterialTrackingNode implements LayerNode {
   }
 }
 
+class CaptureStatusTrackingNode extends TrackingNode {
+  constructor(
+    id: string,
+    type: FrameObjectType,
+    private readonly statuses: CaptureStatus[],
+  ) {
+    super(id, type);
+  }
+
+  update(state: FrameObject) {
+    super.update(state);
+    return { captureStatus: this.statuses[this.updates - 1] ?? "ready" };
+  }
+}
+
 class WebGpuLightingTrackingNode implements LayerNode {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   readonly object3D: any;
@@ -108,6 +125,38 @@ class WebGpuLightingTrackingNode implements LayerNode {
   }
 
   update() {}
+
+  dispose() {
+    this.object3D.geometry.dispose();
+    this.object3D.material.dispose();
+  }
+}
+
+class WebGpuLightingUpdateNode implements LayerNode {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  readonly object3D: any;
+
+  constructor(
+    id: string,
+    private readonly context: LayerNodeContext,
+  ) {
+    const uniforms = createLayerLightingUniforms();
+    const nodes = createLayerLightingNodes(uniforms);
+    const material = new THREE.MeshBasicMaterial();
+    material.userData.layerLightingUniforms = uniforms;
+    material.userData.layerLightingNodes = nodes;
+    this.object3D = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), material);
+    this.object3D.name = `webgpu-lighting-update:${id}`;
+  }
+
+  update() {
+    applyLayerLightingUniforms(
+      this.object3D.material,
+      this.context.getLighting?.() as Parameters<
+        typeof applyLayerLightingUniforms
+      >[1],
+    );
+  }
 
   dispose() {
     this.object3D.geometry.dispose();
@@ -137,6 +186,18 @@ function makeMaterialTrackingFactory(
   };
 }
 
+function makeCaptureStatusTrackingFactory(
+  kind: FrameObjectType | "default",
+  statuses: CaptureStatus[],
+): LayerNodeFactory {
+  return {
+    kind,
+    create(object) {
+      return new CaptureStatusTrackingNode(object.id, object.type, statuses);
+    },
+  };
+}
+
 function makeWebGpuLightingTrackingFactory(
   kind: FrameObjectType | "default",
 ): LayerNodeFactory {
@@ -144,6 +205,17 @@ function makeWebGpuLightingTrackingFactory(
     kind,
     create(object) {
       return new WebGpuLightingTrackingNode(object.id);
+    },
+  };
+}
+
+function makeWebGpuLightingUpdateFactory(
+  kind: FrameObjectType | "default",
+): LayerNodeFactory {
+  return {
+    kind,
+    create(object, context) {
+      return new WebGpuLightingUpdateNode(object.id, context);
     },
   };
 }
@@ -246,6 +318,34 @@ describe("LayerNodeSync", () => {
 
     const node = sync.group.children[0].userData.trackingNode as TrackingNode;
     expect(node.updates).toBe(1);
+    sync.dispose();
+  });
+
+  it("keeps updating static WebGPU text until per-element capture is ready", () => {
+    clearLayerNodeRegistry();
+    registerLayerNodeFactory(
+      makeCaptureStatusTrackingFactory("text", ["pending", "ready"]),
+    );
+    const sync = new LayerNodeSync({
+      ...makeContext(),
+      materialBackend: "webgpu-node",
+    });
+    const object = {
+      ...makeObject("text", "text"),
+      props: { castShadow: true },
+    };
+    const part = makePart([object]);
+
+    const first = sync.sync(part, 0, { quality: "live" });
+    const second = sync.sync(part, 0, { quality: "live" });
+
+    const node = sync.group.children[0].userData.trackingNode as TrackingNode;
+    expect(node.updates).toBe(2);
+    expect(first.captureStatus).toBe("pending");
+    expect(first.casterStatus).toBe("pending");
+    expect(first.pendingCasterIds).toEqual(["text"]);
+    expect(second.captureStatus).toBe("ready");
+    expect(second.casterStatus).toBe("ready");
     sync.dispose();
   });
 
@@ -508,6 +608,55 @@ describe("LayerNodeSync", () => {
     sync.applyShadow(shadow);
 
     expect(nodes.u_lightIntensity.array[0]).toBe(5);
+    sync.dispose();
+  });
+
+  it("reapplies shadow after an animated node update writes empty lighting", () => {
+    clearLayerNodeRegistry();
+    registerLayerNodeFactory(makeWebGpuLightingUpdateFactory("default"));
+    const sync = new LayerNodeSync(makeContext());
+    const shadow: LayerShadowState = {
+      active: true,
+      texture: new THREE.Texture(),
+      matrix: new THREE.Matrix4(),
+      viewMatrix: new THREE.Matrix4(),
+      near: 1,
+      far: 1200,
+      bias: 0.004,
+      darkness: 0.72,
+      mapFlipY: true,
+    };
+    const part = makePart([
+      {
+        ...makeObject("light", "light"),
+        props: { kind: "directional", intensity: 1 },
+      },
+      {
+        ...makeObject("rect", "rect"),
+        tracks: {
+          "bounds.x": {
+            valueType: "number",
+            points: [
+              { time: 0, value: 0 },
+              { time: 2, value: 10 },
+            ],
+          },
+        },
+      },
+    ]);
+
+    sync.sync(part, 0);
+    sync.applyShadow(shadow);
+    const mesh = sync.group.children[0] as any;
+    const nodes = mesh.material.userData.layerLightingNodes;
+    expect(nodes.u_shadowActive.value).toBe(1);
+
+    sync.sync(part, 2);
+    expect(nodes.u_shadowActive.value).toBe(0);
+    sync.applyShadow(shadow);
+
+    expect(nodes.u_shadowActive.value).toBe(1);
+    expect(nodes.u_shadowMapFlipY.value).toBe(1);
     sync.dispose();
   });
 

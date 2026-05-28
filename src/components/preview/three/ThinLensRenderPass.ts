@@ -11,7 +11,7 @@ import type { CompositionSceneInput } from "./CompositionSceneInput";
 
 const GOLDEN_ANGLE = 2.39996323;
 export const THIN_LENS_SAMPLES = 64;
-const APERTURE_WORLD_SCALE = 0.02;
+export const THIN_LENS_LIVE_SAMPLES = THIN_LENS_SAMPLES;
 const MIN_BLUR_CAP_DEPTH = 100;
 
 type ThinLensRenderPassOptions = {
@@ -21,6 +21,11 @@ type ThinLensRenderPassOptions = {
   width: number;
   height: number;
   name: string;
+};
+
+export type ThinLensRenderOptions = {
+  resetKey?: string;
+  maxSamples?: number;
 };
 
 export class ThinLensRenderPass {
@@ -44,6 +49,8 @@ export class ThinLensRenderPass {
   private readonly accumulateBToAPipeline: any;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   private readonly copyBToAPipeline: any;
+  private accumulationKey = "";
+  private accumulatedSamples = 0;
 
   constructor(options: ThinLensRenderPassOptions) {
     this.renderer = options.renderer;
@@ -90,15 +97,36 @@ export class ThinLensRenderPass {
     this.outputNode = texture(this.accumulationA.texture);
   }
 
-  render(camera: CameraObjectProps): void {
+  render(
+    camera: CameraObjectProps,
+    sampleCount = THIN_LENS_SAMPLES,
+    options: ThinLensRenderOptions = {},
+  ): void {
+    const maxSamples = getThinLensSampleCount(
+      options.maxSamples ?? THIN_LENS_SAMPLES,
+    );
+    const nextSamples = Math.min(
+      getThinLensSampleCount(sampleCount),
+      maxSamples,
+    );
     const apertureRadiusWorld = getThinLensApertureRadiusWorld(
       camera,
       this.sampleTarget.height,
     );
     const previousTarget = this.renderer.getRenderTarget?.() ?? null;
     if (apertureRadiusWorld <= 0) {
+      this.resetAccumulation();
       this.renderSingleSample(previousTarget);
       return;
+    }
+
+    const resetKey = options.resetKey ?? "";
+    if (
+      resetKey !== this.accumulationKey ||
+      this.accumulatedSamples >= maxSamples
+    ) {
+      this.accumulationKey = resetKey;
+      this.resetAccumulation();
     }
 
     const renderCamera = this.sceneInput.camera;
@@ -106,15 +134,15 @@ export class ThinLensRenderPass {
     const baseQuaternion = renderCamera.quaternion.clone();
     const focusDistance = getThinLensFocusDistance(camera);
     const focusPoint = getFocusPoint(renderCamera, focusDistance);
-    let accumulationIsA = true;
+    const targetSamples = Math.min(
+      maxSamples,
+      this.accumulatedSamples + nextSamples,
+    );
 
-    this.clearTarget(this.accumulationA);
-    this.clearTarget(this.accumulationB);
-
-    for (let i = 0; i < THIN_LENS_SAMPLES; i += 1) {
+    for (let i = this.accumulatedSamples; i < targetSamples; i += 1) {
       const sample = sampleThinLensAperture(
         i,
-        THIN_LENS_SAMPLES,
+        maxSamples,
         camera.dof.bokeh.preset,
       );
       applyThinLensSample(
@@ -128,16 +156,16 @@ export class ThinLensRenderPass {
       this.sceneInput.syncBackgroundMeshToCamera();
       this.renderSceneTo(this.sampleTarget);
       this.sampleWeight.value = 1 / (i + 1);
-      if (accumulationIsA) {
+      if (i % 2 === 0) {
         this.renderPipelineTo(this.accumulateAToBPipeline, this.accumulationB);
-        accumulationIsA = false;
       } else {
         this.renderPipelineTo(this.accumulateBToAPipeline, this.accumulationA);
-        accumulationIsA = true;
       }
     }
 
-    if (!accumulationIsA) {
+    this.accumulatedSamples = targetSamples;
+
+    if (this.accumulatedSamples % 2 === 1) {
       this.renderPipelineTo(this.copyBToAPipeline, this.accumulationA);
     }
 
@@ -145,7 +173,7 @@ export class ThinLensRenderPass {
     renderCamera.quaternion.copy(baseQuaternion);
     renderCamera.updateMatrixWorld(true);
     this.sceneInput.syncBackgroundMeshToCamera();
-    this.renderer.setRenderTarget(previousTarget);
+    this.setRenderTarget(previousTarget);
   }
 
   dispose(): void {
@@ -159,21 +187,26 @@ export class ThinLensRenderPass {
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   private clearTarget(target: any): void {
-    this.renderer.setRenderTarget(target);
-    this.renderer.clear();
+    this.setRenderTarget(target);
+    this.clear();
+  }
+
+  private resetAccumulation(): void {
+    this.accumulatedSamples = 0;
+    this.clearTarget(this.accumulationA);
+    this.clearTarget(this.accumulationB);
   }
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   private renderSceneTo(target: any): void {
-    this.renderer.setRenderTarget(target);
-    this.renderer.clear();
+    this.setRenderTarget(target);
+    this.clear();
     this.renderer.render(this.sceneInput.scene, this.sceneInput.camera);
   }
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   private renderPipelineTo(pipeline: any, target: any): void {
-    this.renderer.setRenderTarget(target);
-    this.renderer.clear();
+    this.setRenderTarget(target);
     pipeline.render();
   }
 
@@ -181,8 +214,21 @@ export class ThinLensRenderPass {
   private renderSingleSample(previousTarget: any): void {
     this.sceneInput.syncBackgroundMeshToCamera();
     this.renderSceneTo(this.accumulationA);
-    this.renderer.setRenderTarget(previousTarget);
+    this.setRenderTarget(previousTarget);
   }
+
+  private setRenderTarget(target: any): void {
+    this.renderer.setRenderTarget(target);
+  }
+
+  private clear(): void {
+    this.renderer.clear();
+  }
+}
+
+export function getThinLensSampleCount(sampleCount: number): number {
+  if (!Number.isFinite(sampleCount)) return THIN_LENS_SAMPLES;
+  return Math.max(1, Math.min(THIN_LENS_SAMPLES, Math.round(sampleCount)));
 }
 
 export function hasActiveThinLensDof(
@@ -204,13 +250,12 @@ export function getThinLensApertureRadiusWorld(
   if (!hasActiveThinLensDof(camera)) return 0;
   const focusDistance = getThinLensFocusDistance(camera);
   const fovRad = (camera.fov * Math.PI) / 180;
-  const focalLengthMm = getThinLensFocalLengthMm(camera, fovRad);
-  if (!Number.isFinite(focalLengthMm) || focalLengthMm <= 0) return 0;
-  const apertureRadiusMm =
-    focalLengthMm / Math.max(camera.dof.fNumber, CAMERA_DOF_MIN_F_NUMBER) / 2;
-  const sceneHeightAtFocus = 2 * focusDistance * Math.tan(fovRad * 0.5);
-  const sceneUnitsPerMm = sceneHeightAtFocus / camera.sensor.height;
-  const radius = apertureRadiusMm * sceneUnitsPerMm * APERTURE_WORLD_SCALE;
+  const radius = getThinLensRadiusFromCoc(
+    camera,
+    focusDistance,
+    fovRad,
+    resolutionHeight,
+  );
   const maxRadius = getThinLensMaxBlurRadiusWorld(
     camera,
     focusDistance,
@@ -258,6 +303,57 @@ export function getThinLensMaxBlurRadiusWorld(
   if (!Number.isFinite(defocusPerWorldUnit) || defocusPerWorldUnit <= 1e-6)
     return Number.POSITIVE_INFINITY;
   return maxBlurPx / defocusPerWorldUnit;
+}
+
+function getThinLensRadiusFromCoc(
+  camera: CameraObjectProps,
+  focusDistance: number,
+  fovRad: number,
+  resolutionHeight: number,
+): number {
+  const height = Math.max(1, resolutionHeight);
+  const tanHalfFov = Math.tan(fovRad * 0.5);
+  if (!Number.isFinite(tanHalfFov) || tanHalfFov <= 0) return 0;
+  const candidates = [
+    Math.max(MIN_BLUR_CAP_DEPTH, camera.near),
+    Math.max(camera.near, Math.min(camera.far - 1, focusDistance * 2)),
+    Math.max(camera.near, camera.far - 1),
+  ];
+  let radius = 0;
+  for (const subjectDepth of candidates) {
+    if (!Number.isFinite(subjectDepth) || subjectDepth <= 0) continue;
+    const defocusPerWorldUnit =
+      (height / (2 * tanHalfFov)) *
+      Math.abs(1 / focusDistance - 1 / subjectDepth);
+    if (!Number.isFinite(defocusPerWorldUnit) || defocusPerWorldUnit <= 1e-6)
+      continue;
+    const cocPx = Math.abs(
+      computeThinLensSignedCocPx(camera, subjectDepth, height, fovRad),
+    );
+    radius = Math.max(radius, cocPx / defocusPerWorldUnit);
+  }
+  return radius;
+}
+
+function computeThinLensSignedCocPx(
+  camera: CameraObjectProps,
+  sceneDepth: number,
+  resolutionHeight: number,
+  fovRad = (camera.fov * Math.PI) / 180,
+): number {
+  if (!Number.isFinite(sceneDepth) || sceneDepth <= 0) return 0;
+  const focalLengthMm = getThinLensFocalLengthMm(camera, fovRad);
+  if (!Number.isFinite(focalLengthMm) || focalLengthMm <= 0) return 0;
+  const minDistance = focalLengthMm * 1.01;
+  const focus = Math.max(camera.dof.focusDistance, minDistance);
+  const subject = Math.max(sceneDepth, minDistance);
+  const apertureDiameter =
+    focalLengthMm / Math.max(camera.dof.fNumber, CAMERA_DOF_MIN_F_NUMBER);
+  const denom = focus * (subject - focalLengthMm);
+  if (Math.abs(denom) < 1e-6) return 0;
+  const cocMm = (apertureDiameter * focalLengthMm * (subject - focus)) / denom;
+  const cocPx = cocMm * (resolutionHeight / camera.sensor.height);
+  return Math.max(-camera.dof.maxBlurPx, Math.min(camera.dof.maxBlurPx, cocPx));
 }
 
 export function sampleThinLensAperture(

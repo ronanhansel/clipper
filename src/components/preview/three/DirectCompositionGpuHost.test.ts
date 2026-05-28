@@ -115,10 +115,19 @@ describe("shouldRenderDirectLiveClockFallback", () => {
     ).toBe(true);
   });
 
-  it("keeps scrub fallback even with a scheduler", () => {
+  it("lets scheduler own scrub frames when available", () => {
     expect(
       shouldRenderDirectLiveClockFallback({
         hasScheduler: true,
+        source: "scrub",
+      }),
+    ).toBe(false);
+  });
+
+  it("keeps scrub fallback when no scheduler is available", () => {
+    expect(
+      shouldRenderDirectLiveClockFallback({
+        hasScheduler: false,
         source: "scrub",
       }),
     ).toBe(true);

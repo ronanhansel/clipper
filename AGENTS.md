@@ -18,6 +18,7 @@ Project-agnostic engineering rules. For domain specifics, see `docs/`.
 
 - Profile before refactoring for performance. Don't optimise by guess; measure with a CPU trace, a test run, or a benchmark.
 - For any lag, stutter, playback, scrub, preview, renderer, inspector, or hot-path performance query, read `docs/PERFORMANCE.md` before diagnosing or editing.
+- Make sure `docs/PERFORMANCE.md` is only containing general rules, not specific cases. Only add to it if there's repetable patterns.
 - Read the code path before claiming a cause. Symptoms in module A can be triggered by IPC, async I/O, or main-thread work that doesn't appear in A's source.
 - Before extracting a wrapper, weigh saved lines vs added options-bag lines. If the wrapper only relocates an input bag, leave it.
 - Before extracting a hook that depends on N helpers, lift the helpers into a shared module first. Hooks must not import their own consumer's internals.

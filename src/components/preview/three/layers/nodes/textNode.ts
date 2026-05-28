@@ -11,9 +11,7 @@ import type {
 import { createPerElementCaptureFactory } from "./perElementCaptureNode";
 import { resolveLayerTransform } from "../layerTransform";
 import {
-  applyLayerLightingUniforms,
   createLayerLightingUniforms,
-  EMPTY_LAYER_LIGHTING,
   LAYER_LIGHTING_FRAGMENT,
   LAYER_LIGHTING_VERTEX_BODY,
   LAYER_LIGHTING_VERTEX_VARYINGS,
@@ -38,12 +36,11 @@ class TextNode implements LayerNode {
   private readonly text: any;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   private readonly material: any;
-  private readonly context: LayerNodeContext;
   private width = 0;
   private height = 0;
 
   constructor(id: string, context: LayerNodeContext) {
-    this.context = context;
+    void context;
     const wrapper = new THREE.Group();
     wrapper.name = `TextNode:${id}`;
     this.object3D = wrapper;
@@ -131,10 +128,6 @@ class TextNode implements LayerNode {
 
     this.text.material = this.material;
     this.text.fillOpacity = opacity * (colour?.a ?? 1);
-    applyLayerLightingUniforms(
-      { uniforms: this.material.userData.layerLightingUniforms },
-      this.context.getLighting?.() ?? EMPTY_LAYER_LIGHTING,
-    );
 
     this.text.sync();
   }

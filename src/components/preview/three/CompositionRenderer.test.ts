@@ -5,10 +5,18 @@ import {
 } from "../../../core/types";
 import type { PostProcessPass } from "../../../core/effects/types";
 import {
+  getThinLensRenderSampleBudget,
   getCompositionCameraSignature,
   shouldSkipEmptyGpuPostProcessPasses,
+  usesCameraDofDiagnosticNode,
+  usesPhysicalThinLensDof,
 } from "./CompositionRenderer";
-import { hasActiveThinLensDof } from "./ThinLensRenderPass";
+import {
+  getThinLensSampleCount,
+  hasActiveThinLensDof,
+  THIN_LENS_LIVE_SAMPLES,
+  THIN_LENS_SAMPLES,
+} from "./ThinLensRenderPass";
 
 function makeCamera(
   override: (base: CameraObjectProps) => void = () => {},
@@ -111,5 +119,57 @@ describe("hasActiveThinLensDof", () => {
 
   it("does not run thin-lens rendering when DoF is disabled", () => {
     expect(hasActiveThinLensDof(makeCamera())).toBe(false);
+  });
+});
+
+describe("CompositionRenderer DoF routing", () => {
+  it("routes normal active DoF through physical thin-lens rendering", () => {
+    const camera = makeCamera((next) => {
+      next.dof.enabled = true;
+      next.dof.fNumber = 2.8;
+      next.dof.focusDistance = 1500;
+      next.dof.blurMode = "all";
+      next.dof.debug = false;
+    });
+
+    expect(usesPhysicalThinLensDof(camera)).toBe(true);
+    expect(usesCameraDofDiagnosticNode(camera)).toBe(false);
+  });
+
+  it("keeps screen-space DoF node limited to explicit diagnostics", () => {
+    expect(
+      usesCameraDofDiagnosticNode(
+        makeCamera((next) => {
+          next.dof.enabled = true;
+          next.dof.fNumber = 2.8;
+          next.dof.debug = true;
+        }),
+      ),
+    ).toBe(true);
+    expect(
+      usesCameraDofDiagnosticNode(
+        makeCamera((next) => {
+          next.dof.enabled = true;
+          next.dof.fNumber = 2.8;
+          next.dof.blurMode = "near";
+        }),
+      ),
+    ).toBe(true);
+  });
+
+  it("keeps full physical sample quality for live scheduler frames", () => {
+    expect(getThinLensRenderSampleBudget("live")).toBe(THIN_LENS_LIVE_SAMPLES);
+    expect(getThinLensRenderSampleBudget("full")).toBe(THIN_LENS_SAMPLES);
+    expect(getThinLensRenderSampleBudget(undefined)).toBe(THIN_LENS_SAMPLES);
+  });
+});
+
+describe("getThinLensSampleCount", () => {
+  it("clamps live preview sample budgets without changing full quality", () => {
+    expect(getThinLensSampleCount(8)).toBe(8);
+    expect(getThinLensSampleCount(0)).toBe(1);
+    expect(getThinLensSampleCount(THIN_LENS_SAMPLES + 100)).toBe(
+      THIN_LENS_SAMPLES,
+    );
   });
 });

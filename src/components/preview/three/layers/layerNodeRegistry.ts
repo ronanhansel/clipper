@@ -25,7 +25,10 @@ export interface LayerNode {
    * `(part, localTime)`. Implementations update bounds, transform,
    * type-specific style, and any internal materials/uniforms.
    */
-  update(state: EvaluatedObjectState, options?: LayerNodeUpdateOptions): void;
+  update(
+    state: EvaluatedObjectState,
+    options?: LayerNodeUpdateOptions,
+  ): LayerNodeUpdateResult | void;
   /**
    * Release Three resources owned by this node (geometry, material,
    * textures it allocated, etc.). The caller removes `object3D` from
@@ -37,6 +40,13 @@ export interface LayerNode {
 export type LayerNodeUpdateOptions = {
   localTime: number;
   isPlaying: boolean;
+  quality: "full" | "live";
+};
+
+export type CaptureStatus = "ready" | "pending" | "failed";
+
+export type LayerNodeUpdateResult = {
+  captureStatus?: CaptureStatus;
 };
 
 /**

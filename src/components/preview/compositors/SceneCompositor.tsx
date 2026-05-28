@@ -410,6 +410,7 @@ export const SceneCompositor = memo(function SceneCompositor({
                             ? prewarmItem.previewTime
                             : 0
                       }
+                      renderActive={isVisible}
                       sourceSlots={
                         visibleItem
                           ? [visibleItem]

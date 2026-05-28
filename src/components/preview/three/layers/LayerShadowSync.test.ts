@@ -489,27 +489,26 @@ describe("LayerShadowSync", () => {
     sync.dispose();
   });
 
-  it("skips shadow input traversal for reusable static native casters", () => {
+  it("keeps the previous shadow map when caster meshes are temporarily missing", () => {
     const sync = new LayerShadowSync();
     const layerRoot = new THREE.Group();
-    layerRoot.add(makeRectMesh("rect-1", new THREE.Vector2(10, 20)));
-    const originalTraverse = layerRoot.traverse.bind(layerRoot);
-    let traverseCount = 0;
-    layerRoot.traverse = ((
-      callback: Parameters<typeof layerRoot.traverse>[0],
-    ) => {
-      traverseCount += 1;
-      originalTraverse(callback);
-    }) as typeof layerRoot.traverse;
+    const mesh = makeRectMesh("rect-1", new THREE.Vector2(10, 20));
+    layerRoot.add(mesh);
 
+    let renderCount = 0;
+    let clearCount = 0;
     const renderer = {
       getRenderTarget: () => null,
       getClearColor: () => {},
       getClearAlpha: () => 1,
       setRenderTarget: () => {},
       setClearColor: () => {},
-      clear: () => {},
-      render: () => {},
+      clear: () => {
+        clearCount += 1;
+      },
+      render: () => {
+        renderCount += 1;
+      },
     };
 
     const part = makePart([
@@ -518,10 +517,76 @@ describe("LayerShadowSync", () => {
     ]);
 
     sync.sync(part, 0, renderer, layerRoot);
-    const firstTraverseCount = traverseCount;
-    sync.sync(part, 1, renderer, layerRoot);
+    const firstState = sync.getState();
+    expect(renderCount).toBe(2);
+    expect(clearCount).toBe(2);
 
-    expect(traverseCount).toBe(firstTraverseCount);
+    layerRoot.remove(mesh);
+    sync.sync(
+      makePart([
+        makeLight(),
+        makeObject("rect-1", { x: 10, y: 0, width: 10, height: 20 }),
+      ]),
+      1,
+      renderer,
+      layerRoot,
+    );
+
+    expect(sync.getState()).toBe(firstState);
+    expect(sync.getDiagnostics().reason).toBe("waiting-for-caster-meshes");
+    expect(renderCount).toBe(2);
+    expect(clearCount).toBe(2);
+
+    layerRoot.add(mesh);
+    sync.sync(
+      makePart([
+        makeLight(),
+        makeObject("rect-1", { x: 10, y: 0, width: 10, height: 20 }),
+      ]),
+      1,
+      renderer,
+      layerRoot,
+    );
+
+    expect(renderCount).toBe(4);
+    expect(clearCount).toBe(4);
+    sync.dispose();
+  });
+
+  it("keeps the previous shadow map while caster capture is pending", () => {
+    const sync = new LayerShadowSync();
+    const layerRoot = new THREE.Group();
+    layerRoot.add(makeRectMesh("rect-1", new THREE.Vector2(10, 20)));
+
+    let renderCount = 0;
+    const renderer = {
+      getRenderTarget: () => null,
+      getClearColor: () => {},
+      getClearAlpha: () => 1,
+      setRenderTarget: () => {},
+      setClearColor: () => {},
+      clear: () => {},
+      render: () => {
+        renderCount += 1;
+      },
+    };
+
+    const part = makePart([
+      makeLight(),
+      makeObject("rect-1", { x: 0, y: 0, width: 10, height: 20 }),
+    ]);
+    sync.sync(part, 0, renderer, layerRoot);
+    const firstState = sync.getState();
+
+    sync.sync(part, 1, renderer, layerRoot, {
+      casterStatus: "pending",
+      pendingCasterIds: ["rect-1"],
+      failedCasterIds: [],
+    });
+
+    expect(sync.getState()).toBe(firstState);
+    expect(sync.getDiagnostics().reason).toBe("waiting-for-caster-capture");
+    expect(renderCount).toBe(2);
     sync.dispose();
   });
 

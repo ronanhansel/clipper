@@ -67,7 +67,7 @@ React reconciles on the next tick; the user sees the imperative update immediate
 
 `PreviewRenderScheduler` is the single owner of preview rendering rAFs.
 
-- Idle (`isPlaying === false`): no rAF unless `requestRender(cause)` is called. Same-tick calls coalesce.
+- Idle (`isPlaying === false`): no rAF unless `requestRender(cause)` is called. Same-tick calls coalesce; repeated `scrub` renders are capped to the project FPS and always read the latest clock at fire time.
 - Playing: scheduler runs its own rAF loop at the project FPS (skipping vsyncs as needed for 24 / 30).
 - One scheduler per `PreviewColumn` mount. No global singletons.
 
@@ -93,6 +93,12 @@ when the first paint is the important feedback (for example playhead chrome
 moving before expensive preview work). If the preview itself must follow the
 cursor, use latest-rAF coalescing and make the preview work cheap enough for
 that frame.
+
+When a scrub render needs post-paint scheduling, register the pending render
+with `PreviewRenderScheduler` before the post-paint wait. Components must not
+hold scrub work in a private rAF/timer gate and only notify the scheduler later;
+that splits backpressure ownership and can under-feed the FPS-capped preview
+during fast pointer movement.
 
 Scrub render causes must flow to the renderer. Transient scrub frames should
 skip final-quality work that can be reused or refreshed after the gesture, such
@@ -133,6 +139,12 @@ update TSL uniforms rather than remounting the transition composite.
 - In Direct transitions, use current scene time for transition progress and
   post-process uniforms; use the derived from/to scene times only to select the
   two source frames.
+- Retained hidden preview hosts may stay mounted to avoid remount churn, but
+  they must be explicitly inactive: no live-clock subscriptions, source-DOM
+  sync, or render work while hidden.
+- When live preview work cannot be skipped or degraded without changing the
+  result, schedule it after the first input paint during scrub (`rAF` followed
+  by `setTimeout(0)`) so imperative cursor/playhead feedback stays responsive.
 
 ## Strategy decisions
 

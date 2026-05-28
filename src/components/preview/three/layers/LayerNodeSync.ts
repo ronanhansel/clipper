@@ -11,8 +11,10 @@ import type { EvaluatedObjectState } from "../../../../core/propertyRegistry";
 import {
   getLayerNodeFactory,
   registerLayerNodeFactory,
+  type CaptureStatus,
   type LayerNode,
   type LayerNodeContext,
+  type LayerNodeUpdateResult,
 } from "./layerNodeRegistry";
 import { rectNodeFactory } from "./nodes/rectNode";
 import { nullNodeFactory } from "./nodes/nullNode";
@@ -74,6 +76,14 @@ type Entry = {
   node: LayerNode;
   lastStaticObject?: FrameObject;
   lastStaticStackIndex?: number;
+  lastCaptureStatus: CaptureStatus;
+};
+
+export type LayerNodeSyncResult = {
+  captureStatus: CaptureStatus;
+  casterStatus: CaptureStatus;
+  pendingCasterIds: string[];
+  failedCasterIds: string[];
 };
 
 const FLAT_LAYER_RENDER_ORDER_BASE = 100;
@@ -81,6 +91,15 @@ const STATIC_LAYER_UPDATE_SKIP_TYPES = new Set<FrameObjectType>([
   "rect",
   "text",
   "null",
+]);
+
+const DIRECT_DOM_CAPTURE_TYPES = new Set<FrameObjectType>([
+  "html",
+  "template",
+  "custom-renderer",
+  "pattern2d",
+  "code",
+  "media",
 ]);
 
 type MaterialDepthDefaults = {
@@ -233,9 +252,14 @@ export class LayerNodeSync {
   sync(
     part: CompositionClip | null,
     localTime: number,
-    options: { isPlaying?: boolean } = {},
-  ): void {
+    options: { isPlaying?: boolean; quality?: "full" | "live" } = {},
+  ): LayerNodeSyncResult {
     const seen = new Set<string>();
+    const casterIds = new Set<string>();
+    const pendingCasterIds: string[] = [];
+    const failedCasterIds: string[] = [];
+    let captureStatus: CaptureStatus = "ready";
+    let updatedLightingConsumer = false;
     if (part) {
       this.lighting = this.readLayerLightingState(part, localTime);
       let stackIndex = 0;
@@ -259,7 +283,12 @@ export class LayerNodeSync {
           const factory = getLayerNodeFactory(object.type);
           if (!factory) continue;
           const node = factory.create(object, this.context);
-          entry = { id: object.id, type: object.type, node };
+          entry = {
+            id: object.id,
+            type: object.type,
+            node,
+            lastCaptureStatus: "ready",
+          };
           this.entries.set(object.id, entry);
           this.group.add(node.object3D);
           this.entriesVersion += 1;
@@ -269,25 +298,44 @@ export class LayerNodeSync {
           entry,
           object,
           stackIndex,
+          this.context.materialBackend,
         );
         if (!shouldSkipStaticUpdate) {
           const state = readPreviewObjectState(object, localTime);
-          entry.node.update(state, {
+          const updateResult = entry.node.update(state, {
             localTime,
             isPlaying: options.isPlaying === true,
+            quality: options.quality ?? "full",
           });
+          const nodeCaptureStatus = readNodeCaptureStatus(updateResult);
+          entry.lastCaptureStatus = nodeCaptureStatus;
+          captureStatus = combineCaptureStatus(
+            captureStatus,
+            nodeCaptureStatus,
+          );
+          updatedLightingConsumer = true;
           tagLayerObject(entry.node.object3D, object);
           applyLayerRenderSemantics(
             entry.node.object3D,
             stackIndex,
             isFlatLayer(state),
           );
-          if (isStaticLayerUpdateSkippable(object)) {
+          if (
+            isStaticLayerUpdateSkippable(object, this.context.materialBackend)
+          ) {
             entry.lastStaticObject = object;
             entry.lastStaticStackIndex = stackIndex;
           } else {
             entry.lastStaticObject = undefined;
             entry.lastStaticStackIndex = undefined;
+          }
+        }
+        if (canCastShadow(object)) {
+          casterIds.add(object.id);
+          if (entry.lastCaptureStatus === "pending") {
+            pendingCasterIds.push(object.id);
+          } else if (entry.lastCaptureStatus === "failed") {
+            failedCasterIds.push(object.id);
           }
         }
         stackIndex += 1;
@@ -296,6 +344,7 @@ export class LayerNodeSync {
       this.lighting = EMPTY_LAYER_LIGHTING;
       this.lightingPart = null;
       this.lightingReusableForPart = false;
+      updatedLightingConsumer = true;
     }
 
     for (const [id, entry] of this.entries) {
@@ -305,6 +354,16 @@ export class LayerNodeSync {
       this.entries.delete(id);
       this.entriesVersion += 1;
     }
+    if (updatedLightingConsumer) {
+      this.appliedLightingEntriesVersion = -1;
+      this.appliedLightingSignature = "";
+    }
+    const casterStatus: CaptureStatus = failedCasterIds.length
+      ? "failed"
+      : pendingCasterIds.length
+        ? "pending"
+        : "ready";
+    return { captureStatus, casterStatus, pendingCasterIds, failedCasterIds };
   }
 
   describeForTests(): { id: string; type: FrameObjectType }[] {
@@ -375,18 +434,67 @@ function canSkipStaticLayerUpdate(
   entry: Entry,
   object: FrameObject,
   stackIndex: number,
+  backend: LayerNodeContext["materialBackend"],
 ): boolean {
   return (
     entry.lastStaticObject === object &&
     entry.lastStaticStackIndex === stackIndex &&
-    isStaticLayerUpdateSkippable(object)
+    isStaticLayerUpdateSkippable(object, backend)
   );
 }
 
-function isStaticLayerUpdateSkippable(object: FrameObject): boolean {
+function isStaticLayerUpdateSkippable(
+  object: FrameObject,
+  backend: LayerNodeContext["materialBackend"],
+): boolean {
+  if (isDirectDomCaptureObject(object.type, backend)) return false;
   if (!STATIC_LAYER_UPDATE_SKIP_TYPES.has(object.type)) return false;
   if (Object.keys(object.tracks ?? {}).length > 0) return false;
   return !object.animations?.some((animation) => animation.enabled !== false);
+}
+
+export function isDirectDomCaptureObject(
+  type: FrameObjectType,
+  backend: LayerNodeContext["materialBackend"],
+): boolean {
+  if (backend === "webgpu-node" && type === "text") return true;
+  return DIRECT_DOM_CAPTURE_TYPES.has(type);
+}
+
+export function isDomCaptureFrameSensitive(
+  object: FrameObject,
+  animationsEnabled: boolean,
+): boolean {
+  if (object.type === "media" || object.type === "code") return true;
+  if (Object.keys(object.tracks ?? {}).length > 0) return true;
+  return (
+    animationsEnabled &&
+    object.animations?.some((animation) => animation.enabled !== false) === true
+  );
+}
+
+function readNodeCaptureStatus(
+  result: LayerNodeUpdateResult | void,
+): CaptureStatus {
+  return result?.captureStatus ?? "ready";
+}
+
+function combineCaptureStatus(
+  current: CaptureStatus,
+  next: CaptureStatus,
+): CaptureStatus {
+  if (current === "failed" || next === "failed") return "failed";
+  if (current === "pending" || next === "pending") return "pending";
+  return "ready";
+}
+
+function canCastShadow(object: FrameObject): boolean {
+  return (
+    !object.hidden &&
+    object.type !== "camera" &&
+    object.type !== "light" &&
+    object.props?.castShadow !== false
+  );
 }
 
 function tagLayerObject(

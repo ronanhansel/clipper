@@ -85,6 +85,12 @@ export type LayerShadowDebugImage = {
   objects: LayerShadowObjectDiagnostics[];
 };
 
+export type LayerShadowCasterReadiness = {
+  casterStatus: "ready" | "pending" | "failed";
+  pendingCasterIds: readonly string[];
+  failedCasterIds: readonly string[];
+};
+
 const SHADOW_MAP_SIZE = 2048;
 const SHADOW_DEBUG_SIZE = 64;
 const SHADOW_BIAS = 0.004;
@@ -270,6 +276,11 @@ export class LayerShadowSync {
     renderer: any,
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     layerRoot: any,
+    casterReadiness: LayerShadowCasterReadiness = {
+      casterStatus: "ready",
+      pendingCasterIds: [],
+      failedCasterIds: [],
+    },
   ): LayerShadowState {
     if (!part) return this.deactivate("no-part");
     const light = findShadowLight(part, localTime);
@@ -282,6 +293,19 @@ export class LayerShadowSync {
     if (casterIds.size === 0) {
       return this.deactivate("no-casters", light);
     }
+    const pendingCasterIds = casterReadiness.pendingCasterIds.filter((id) =>
+      casterIds.has(id),
+    );
+    if (pendingCasterIds.length > 0 && this.state.active) {
+      this.diagnostics = {
+        ...this.diagnostics,
+        active: true,
+        reason: "waiting-for-caster-capture",
+        light,
+        casterIds: Array.from(casterIds),
+      };
+      return this.state;
+    }
 
     this.configureCamera(light);
     const shadowInputSignature = buildShadowInputSignature(
@@ -290,12 +314,28 @@ export class LayerShadowSync {
       light,
       casterIds,
       layerRoot,
+      casterReadiness,
     );
     const canReuseShadowMap =
       this.state.active && shadowInputSignature === this.shadowInputSignature;
     const renderDiagnostics = canReuseShadowMap
       ? this.diagnostics.render
       : this.renderShadowMap(renderer, layerRoot, casterIds);
+    if (!canReuseShadowMap && renderDiagnostics.visibleCasters === 0) {
+      this.shadowInputSignature = "";
+      if (this.state.active) {
+        this.diagnostics = {
+          ...this.diagnostics,
+          active: true,
+          reason: "waiting-for-caster-meshes",
+          light,
+          casterIds: Array.from(casterIds),
+          render: renderDiagnostics,
+        };
+        return this.state;
+      }
+      return this.deactivate("no-visible-casters", light);
+    }
     this.shadowInputSignature = shadowInputSignature;
     this.shadowMatrix
       .identity()
@@ -635,6 +675,15 @@ export class LayerShadowSync {
       mesh.material = shadowMaterial;
     });
 
+    if (visibleCasters === 0) {
+      for (const swap of swaps) {
+        swap.mesh.material = swap.material;
+        swap.mesh.visible = swap.visible;
+        disposeShadowMaterial(swap.shadowMaterial);
+      }
+      return { visibleCasters, casterOwners };
+    }
+
     const previousTarget = renderer.getRenderTarget();
     const previousClearColor = new THREE.Color();
     renderer.getClearColor(previousClearColor);
@@ -920,6 +969,7 @@ function buildShadowInputSignature(
   casterIds: Set<string>,
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   layerRoot: any,
+  casterReadiness: LayerShadowCasterReadiness,
 ): string {
   const casterState = part.objects
     .filter((object) => casterIds.has(object.id))
@@ -947,6 +997,7 @@ function buildShadowInputSignature(
   materialState.sort();
   return JSON.stringify({
     light,
+    casterReadiness,
     casters: casterState,
     materials: materialState,
   });

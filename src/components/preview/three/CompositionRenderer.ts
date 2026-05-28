@@ -39,13 +39,26 @@ import {
 } from "./gpuTransitionCompositeNodes";
 import type { CompositionRendererBackendSelection } from "./compositionRendererBackend";
 import type { PostProcessPass } from "../../../core/effects/types";
-import { hasActiveThinLensDof, ThinLensRenderPass } from "./ThinLensRenderPass";
+import {
+  hasActiveThinLensDof,
+  ThinLensRenderPass,
+  THIN_LENS_LIVE_SAMPLES,
+  THIN_LENS_SAMPLES,
+} from "./ThinLensRenderPass";
 
 export interface CompositionRendererOptions {
   width: number;
   height: number;
   backendSelection?: CompositionRendererBackendSelection;
 }
+
+export type CompositionRenderQuality = "full" | "live";
+
+export type CompositionRenderOptions = {
+  quality?: CompositionRenderQuality;
+};
+
+const PREVIEW_DOF_NODE_TAPS = 8;
 
 /**
  * `CompositionRenderer` is the through-camera renderer for a single
@@ -77,8 +90,6 @@ export class CompositionRenderer {
   private webGpuScenePass: any = null;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   private webGpuTransitionScenePass: any = null;
-  private webGpuThinLensStage: ThinLensRenderPass | null = null;
-  private webGpuTransitionThinLensStage: ThinLensRenderPass | null = null;
   private webGpuOutputSignature = "";
   private webGpuDofPass: CameraDofPass | null = null;
   private webGpuTransitionToDofPass: CameraDofPass | null = null;
@@ -91,6 +102,8 @@ export class CompositionRenderer {
   private pendingRenderFrame = 0;
   private readonly sceneInput: CompositionSceneInput;
   private readonly transitionSceneInput: CompositionSceneInput;
+  private readonly thinLensPass: ThinLensRenderPass;
+  private readonly transitionThinLensPass: ThinLensRenderPass;
   private webGpuTransitionComposite: {
     layer: TransitionLayer;
     progress: number;
@@ -105,6 +118,12 @@ export class CompositionRenderer {
   private height: number;
   private compositionCamera: CameraObjectProps | null = null;
   private compositionCameraSignature = getCompositionCameraSignature(null);
+  private thinLensSceneKey = "scene:0";
+  private transitionThinLensSceneKey = "transition:0";
+  private thinLensSceneVersion = 0;
+  private transitionThinLensSceneVersion = 0;
+  private thinLensSceneInputs: ThinLensSceneInputs | null = null;
+  private transitionThinLensSceneInputs: ThinLensSceneInputs | null = null;
 
   constructor(opts: CompositionRendererOptions) {
     // Internal scene/RT output always runs at the canonical frame
@@ -166,6 +185,20 @@ export class CompositionRenderer {
       height: this.height,
       requestRender: () => this.requestCompositionRender(),
     });
+    this.thinLensPass = new ThinLensRenderPass({
+      renderer: this.renderer,
+      sceneInput: this.sceneInput,
+      width: this.width,
+      height: this.height,
+      name: "camera",
+    });
+    this.transitionThinLensPass = new ThinLensRenderPass({
+      renderer: this.renderer,
+      sceneInput: this.transitionSceneInput,
+      width: this.width,
+      height: this.height,
+      name: "transition-to-camera",
+    });
     const scenePass = pass(this.sceneInput.scene, this.sceneInput.camera, {
       type: THREE.HalfFloatType,
       format: THREE.RGBAFormat,
@@ -179,20 +212,6 @@ export class CompositionRenderer {
       },
     );
     this.webGpuScenePass = scenePass;
-    this.webGpuThinLensStage = new ThinLensRenderPass({
-      renderer: this.renderer,
-      sceneInput: this.sceneInput,
-      width: this.width,
-      height: this.height,
-      name: "camera-thin-lens",
-    });
-    this.webGpuTransitionThinLensStage = new ThinLensRenderPass({
-      renderer: this.renderer,
-      sceneInput: this.transitionSceneInput,
-      width: this.width,
-      height: this.height,
-      name: "transition-to-thin-lens",
-    });
     this.webGpuPipeline = new RenderPipeline(this.renderer, scenePass);
     this.webGpuOutputSignature = "scene";
     this.webGpuInitPromise = this.renderer
@@ -307,9 +326,19 @@ export class CompositionRenderer {
     part: CompositionClip | null,
     localTime: number,
     sourceElement: Element | null,
-    options: { syncShadows?: boolean; isPlaying?: boolean } = {},
+    options: {
+      syncShadows?: boolean;
+      isPlaying?: boolean;
+      quality?: CompositionRenderQuality;
+    } = {},
   ) {
     this.webGpuTransitionComposite = null;
+    this.thinLensSceneKey = this.updateThinLensSceneKey(
+      "scene",
+      part,
+      localTime,
+      sourceElement,
+    );
     this.sceneInput.syncComposition(
       part,
       localTime,
@@ -336,10 +365,25 @@ export class CompositionRenderer {
     };
     layer: TransitionLayer;
     progress: number;
-    options?: { syncShadows?: boolean; isPlaying?: boolean };
+    options?: {
+      syncShadows?: boolean;
+      isPlaying?: boolean;
+      quality?: CompositionRenderQuality;
+    };
   }) {
     const options = input.options ?? {};
     this.compositionCamera = input.from.camera;
+    this.thinLensSceneKey = this.updateThinLensSceneKey(
+      "scene",
+      input.from.part,
+      input.from.localTime,
+      input.from.sourceElement,
+    );
+    this.transitionThinLensSceneKey = this.updateTransitionThinLensSceneKey(
+      input.to.part,
+      input.to.localTime,
+      input.to.sourceElement,
+    );
     this.sceneInput.applyCamera(input.from.camera);
     this.transitionSceneInput.applyCamera(input.to.camera);
     this.sceneInput.syncComposition(
@@ -384,10 +428,11 @@ export class CompositionRenderer {
     this.syncWebGpuOutputNode(this.compositionCamera);
   }
 
-  render() {
+  render(options: CompositionRenderOptions = {}) {
     this.sceneInput.applyCamera(this.compositionCamera);
     if (this.webGpuInitFailed || this.renderer.initialized !== true) return;
-    this.renderWebGpuThinLensInputs();
+    this.syncWebGpuOutputNode(this.compositionCamera);
+    this.renderThinLensPasses(options);
     this.renderer.setRenderTarget(null);
     this.webGpuPipeline.render();
   }
@@ -410,22 +455,6 @@ export class CompositionRenderer {
       this.renderer.initialized === true,
     );
     this.render();
-  }
-
-  private renderWebGpuThinLensInputs() {
-    const fromCamera =
-      this.webGpuTransitionComposite?.fromCamera ?? this.compositionCamera;
-    if (hasActiveThinLensDof(fromCamera)) {
-      if (!this.webGpuThinLensStage)
-        throw new Error("Missing WebGPU thin-lens render stage.");
-      this.webGpuThinLensStage.render(fromCamera);
-    }
-    const toCamera = this.webGpuTransitionComposite?.toCamera ?? null;
-    if (hasActiveThinLensDof(toCamera)) {
-      if (!this.webGpuTransitionThinLensStage)
-        throw new Error("Missing WebGPU transition thin-lens render stage.");
-      this.webGpuTransitionThinLensStage.render(toCamera);
-    }
   }
 
   private updateShadowDebugPane() {
@@ -460,8 +489,8 @@ export class CompositionRenderer {
     }
     this.sceneInput.dispose();
     this.transitionSceneInput.dispose();
-    this.webGpuThinLensStage?.dispose();
-    this.webGpuTransitionThinLensStage?.dispose();
+    this.thinLensPass.dispose();
+    this.transitionThinLensPass.dispose();
     this.webGpuPipeline?.dispose?.();
     this.renderer.dispose();
     this.shadowDebugPane.remove();
@@ -480,10 +509,12 @@ export class CompositionRenderer {
           frameSize: { width: this.width, height: this.height },
         })
       : null;
-    const dofActive = hasActiveThinLensDof(camera);
-    const dofPass = camera?.dof.debug
-      ? createCameraDofPass(camera, "camera")
-      : null;
+    const physicalDofActive = usesPhysicalThinLensDof(camera);
+    const diagnosticDofActive = usesCameraDofDiagnosticNode(camera);
+    const dofPass =
+      camera && diagnosticDofActive
+        ? createCameraDofPass(camera, "camera")
+        : null;
 
     const toLensPass = this.webGpuTransitionComposite?.toCamera
       ? getCameraLensPostProcessPass(this.webGpuTransitionComposite.toCamera, {
@@ -491,23 +522,29 @@ export class CompositionRenderer {
           frameSize: { width: this.width, height: this.height },
         })
       : null;
-    const toDofActive = hasActiveThinLensDof(
+    const toPhysicalDofActive = usesPhysicalThinLensDof(
       this.webGpuTransitionComposite?.toCamera ?? null,
     );
-    const toDofPass = this.webGpuTransitionComposite?.toCamera?.dof.debug
-      ? createCameraDofPass(
-          this.webGpuTransitionComposite.toCamera,
-          "transition-to-camera",
-        )
-      : null;
+    const toDiagnosticDofActive = usesCameraDofDiagnosticNode(
+      this.webGpuTransitionComposite?.toCamera ?? null,
+    );
+    const toDofPass =
+      this.webGpuTransitionComposite?.toCamera && toDiagnosticDofActive
+        ? createCameraDofPass(
+            this.webGpuTransitionComposite.toCamera,
+            "transition-to-camera",
+          )
+        : null;
 
     const signature = getWebGpuCameraEffectsSignature(
-      dofActive,
+      physicalDofActive,
+      diagnosticDofActive,
       dofPass,
       lensPass,
     );
     const toSignature = getWebGpuCameraEffectsSignature(
-      toDofActive,
+      toPhysicalDofActive,
+      toDiagnosticDofActive,
       toDofPass,
       toLensPass,
     );
@@ -538,20 +575,20 @@ export class CompositionRenderer {
 
     let outputNode = this.createCameraOutputNode(
       this.webGpuScenePass,
+      this.thinLensPass.outputNode,
       camera,
-      dofActive,
+      physicalDofActive,
       dofPass,
       lensPass,
-      this.webGpuThinLensStage,
     );
     if (this.webGpuTransitionComposite) {
       const toNode = this.createCameraOutputNode(
         this.webGpuTransitionScenePass,
+        this.transitionThinLensPass.outputNode,
         this.webGpuTransitionComposite.toCamera,
-        toDofActive,
+        toPhysicalDofActive,
         toDofPass,
         toLensPass,
-        this.webGpuTransitionThinLensStage,
       );
       outputNode = createGpuTransitionCompositeNode({
         fromNode: outputNode,
@@ -571,22 +608,26 @@ export class CompositionRenderer {
   }
 
   private createCameraOutputNode(
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     scenePass: any,
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    thinLensOutputNode: any,
     camera: CameraObjectProps | null,
-    dofActive: boolean,
+    physicalDofActive: boolean,
     dofPass: CameraDofPass | null,
     lensPass: ReturnType<typeof getCameraLensPostProcessPass>,
-    thinLensStage: ThinLensRenderPass | null,
   ) {
-    let outputNode =
-      camera && dofActive ? thinLensStage?.outputNode : scenePass;
-    if (!outputNode) throw new Error("Missing WebGPU thin-lens render stage.");
+    let outputNode = scenePass;
+    if (camera && physicalDofActive) {
+      outputNode = thinLensOutputNode;
+    }
     if (dofPass) {
       outputNode = createCameraDofModeNode(
         scenePass,
         scenePass.getViewZNode(),
         dofPass,
         { width: this.width, height: this.height },
+        { tapCount: PREVIEW_DOF_NODE_TAPS },
       );
     }
     outputNode = lensPass
@@ -597,17 +638,93 @@ export class CompositionRenderer {
       : outputNode;
     return outputNode;
   }
+
+  private renderThinLensPasses(options: CompositionRenderOptions): void {
+    const sampleCount = getThinLensRenderSampleBudget(options.quality);
+    if (usesPhysicalThinLensDof(this.compositionCamera)) {
+      this.thinLensPass.render(this.compositionCamera, sampleCount, {
+        resetKey: getThinLensResetKey(
+          this.thinLensSceneKey,
+          this.compositionCamera,
+        ),
+      });
+    }
+    const toCamera = this.webGpuTransitionComposite?.toCamera ?? null;
+    if (usesPhysicalThinLensDof(toCamera)) {
+      this.transitionThinLensPass.render(toCamera, sampleCount, {
+        resetKey: getThinLensResetKey(
+          this.transitionThinLensSceneKey,
+          toCamera,
+        ),
+      });
+    }
+  }
+
+  private updateThinLensSceneKey(
+    prefix: string,
+    part: CompositionClip | null,
+    localTime: number,
+    sourceElement: Element | null,
+  ): string {
+    const next = { part, localTime, sourceElement };
+    if (!sameThinLensSceneInputs(this.thinLensSceneInputs, next)) {
+      this.thinLensSceneInputs = next;
+      this.thinLensSceneVersion += 1;
+      this.thinLensSceneKey = `${prefix}:${this.thinLensSceneVersion}`;
+    }
+    return this.thinLensSceneKey;
+  }
+
+  private updateTransitionThinLensSceneKey(
+    part: CompositionClip | null,
+    localTime: number,
+    sourceElement: Element | null,
+  ): string {
+    const next = { part, localTime, sourceElement };
+    if (!sameThinLensSceneInputs(this.transitionThinLensSceneInputs, next)) {
+      this.transitionThinLensSceneInputs = next;
+      this.transitionThinLensSceneVersion += 1;
+      this.transitionThinLensSceneKey = `transition:${this.transitionThinLensSceneVersion}`;
+    }
+    return this.transitionThinLensSceneKey;
+  }
+}
+
+type ThinLensSceneInputs = {
+  part: CompositionClip | null;
+  localTime: number;
+  sourceElement: Element | null;
+};
+
+function sameThinLensSceneInputs(
+  current: ThinLensSceneInputs | null,
+  next: ThinLensSceneInputs,
+): boolean {
+  return (
+    current?.part === next.part &&
+    current.localTime === next.localTime &&
+    current.sourceElement === next.sourceElement
+  );
+}
+
+function getThinLensResetKey(
+  sceneKey: string,
+  camera: CameraObjectProps,
+): string {
+  return `${sceneKey}:${getCompositionCameraSignature(camera)}`;
 }
 
 function getWebGpuCameraEffectsSignature(
-  dofActive: boolean,
+  physicalDofActive: boolean,
+  diagnosticDofActive: boolean,
   dofPass: CameraDofPass | null,
   lensPass: LensPostProcessPass | null,
 ): string {
   const dof = dofPass?.uniforms;
   const lens = lensPass?.uniforms;
   return JSON.stringify({
-    dof: dofActive,
+    physicalDof: physicalDofActive,
+    diagnosticDof: diagnosticDofActive,
     dofMode: dof
       ? {
           debug: dof.debug,
@@ -622,6 +739,27 @@ function getWebGpuCameraEffectsSignature(
         }
       : null,
   });
+}
+
+export function usesCameraDofDiagnosticNode(
+  camera: CameraObjectProps | null,
+): camera is CameraObjectProps {
+  return Boolean(
+    hasActiveThinLensDof(camera) &&
+    (camera.dof.debug === true || camera.dof.blurMode !== "all"),
+  );
+}
+
+export function usesPhysicalThinLensDof(
+  camera: CameraObjectProps | null,
+): camera is CameraObjectProps {
+  return hasActiveThinLensDof(camera) && !usesCameraDofDiagnosticNode(camera);
+}
+
+export function getThinLensRenderSampleBudget(
+  quality: CompositionRenderQuality | undefined,
+): number {
+  return quality === "live" ? THIN_LENS_LIVE_SAMPLES : THIN_LENS_SAMPLES;
 }
 
 function formatShadowDebugText(

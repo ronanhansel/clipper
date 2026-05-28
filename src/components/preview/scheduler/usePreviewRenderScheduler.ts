@@ -7,6 +7,7 @@ export type PreviewRenderHandler = (cause: RenderCause, now: number) => void;
 
 export interface PreviewRenderScheduler {
   requestRender(cause: RenderCause): void;
+  requestPostPaintRender(cause: RenderCause): void;
   subscribe(handler: PreviewRenderHandler): () => void;
   setOptions(options: PreviewRenderSchedulerOptions): void;
   destroy(): void;
@@ -27,8 +28,11 @@ export function createPreviewRenderScheduler(
   let isPlaying = initial.isPlaying;
   let playLoopFrameId = 0;
   let idleFrameId = 0;
+  let idlePostPaintFrameId = 0;
+  let idlePostPaintTimerId: ReturnType<typeof setTimeout> | 0 = 0;
   let pendingIdleCause: RenderCause | null = null;
   let lastTickTime = -Infinity;
+  let lastIdleScrubTime = -Infinity;
   let destroyed = false;
 
   function fire(cause: RenderCause, now: number) {
@@ -63,12 +67,57 @@ export function createPreviewRenderScheduler(
     playLoopFrameId = 0;
   }
 
+  function cancelIdlePostPaint() {
+    if (idlePostPaintFrameId !== 0) {
+      cancelAnimationFrame(idlePostPaintFrameId);
+      idlePostPaintFrameId = 0;
+    }
+    if (idlePostPaintTimerId !== 0) {
+      clearTimeout(idlePostPaintTimerId);
+      idlePostPaintTimerId = 0;
+    }
+  }
+
   function flushIdle(now: number) {
-    idleFrameId = 0;
     const cause = pendingIdleCause;
+    if (destroyed || cause === null) {
+      idleFrameId = 0;
+      return;
+    }
+    if (cause === "scrub") {
+      const intervalMs = 1000 / fps;
+      if (now - lastIdleScrubTime < intervalMs - tickEpsilonMs) {
+        idleFrameId = requestAnimationFrame(flushIdle);
+        return;
+      }
+      lastIdleScrubTime =
+        lastIdleScrubTime === -Infinity
+          ? now
+          : Math.min(lastIdleScrubTime + intervalMs, now);
+    }
+    idleFrameId = 0;
     pendingIdleCause = null;
-    if (destroyed || cause === null) return;
     fire(cause, now);
+  }
+
+  function requestIdleRender(cause: RenderCause) {
+    pendingIdleCause = elevateCause(pendingIdleCause, cause);
+    if (idleFrameId !== 0 || idlePostPaintFrameId !== 0) return;
+    if (idlePostPaintTimerId !== 0) return;
+    idleFrameId = requestAnimationFrame(flushIdle);
+  }
+
+  function requestIdlePostPaintRender(cause: RenderCause) {
+    pendingIdleCause = elevateCause(pendingIdleCause, cause);
+    if (idleFrameId !== 0 || idlePostPaintFrameId !== 0) return;
+    if (idlePostPaintTimerId !== 0) return;
+    idlePostPaintFrameId = requestAnimationFrame((now) => {
+      idlePostPaintFrameId = 0;
+      idlePostPaintTimerId = setTimeout(() => {
+        idlePostPaintTimerId = 0;
+        flushIdle(now);
+      }, 0);
+    });
   }
 
   if (isPlaying) startPlayLoop();
@@ -77,9 +126,12 @@ export function createPreviewRenderScheduler(
     requestRender(cause) {
       if (destroyed) return;
       if (isPlaying) return;
-      pendingIdleCause = elevateCause(pendingIdleCause, cause);
-      if (idleFrameId !== 0) return;
-      idleFrameId = requestAnimationFrame(flushIdle);
+      requestIdleRender(cause);
+    },
+    requestPostPaintRender(cause) {
+      if (destroyed) return;
+      if (isPlaying) return;
+      requestIdlePostPaintRender(cause);
     },
     subscribe(handler) {
       handlers.add(handler);
@@ -97,9 +149,12 @@ export function createPreviewRenderScheduler(
           idleFrameId = 0;
           pendingIdleCause = null;
         }
+        cancelIdlePostPaint();
+        lastIdleScrubTime = -Infinity;
         startPlayLoop();
       } else if (!isPlaying && wasPlaying) {
         stopPlayLoop();
+        lastIdleScrubTime = -Infinity;
       }
     },
     destroy() {
@@ -109,7 +164,9 @@ export function createPreviewRenderScheduler(
         cancelAnimationFrame(idleFrameId);
         idleFrameId = 0;
       }
+      cancelIdlePostPaint();
       pendingIdleCause = null;
+      lastIdleScrubTime = -Infinity;
       handlers.clear();
     },
   };

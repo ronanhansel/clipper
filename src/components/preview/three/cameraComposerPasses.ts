@@ -364,6 +364,7 @@ export function createCameraDofModeNode(
   viewZNode: any,
   pass: CameraDofPass,
   frameSize: { width: number; height: number },
+  options: { tapCount?: number } = {},
 ) {
   const sourceTexture = convertToTexture(sourceNode);
   const u = pass.uniforms;
@@ -394,7 +395,10 @@ export function createCameraDofModeNode(
   const blurMode = dofBlurModeToUniform(u.blurMode);
   const debug = u.debug ? 1 : 0;
   const goldenAngle = float(2.39996323);
-  const tapCount = 64;
+  const tapCount = Math.max(
+    1,
+    Math.min(64, Math.round(options.tapCount ?? 64)),
+  );
 
   return Fn(() => {
     const lensUv = uv();

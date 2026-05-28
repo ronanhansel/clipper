@@ -47,6 +47,14 @@ type ActiveScrub = {
   target: HTMLDivElement;
 };
 
+type ScrubGeometry = {
+  timelineLeft: number;
+  timelineWidth: number;
+  viewportLeft: number;
+  viewportRight: number;
+  viewportScrollLeft: number;
+};
+
 const scrubDragThresholdPx = 3;
 
 export function useTimelineScrubber({
@@ -101,6 +109,7 @@ export function useTimelineScrubber({
   };
   const latestScrubPreviewTimeRef = useRef<number | null>(null);
   const activeScrubRef = useRef<ActiveScrub | null>(null);
+  const scrubGeometryRef = useRef<ScrubGeometry | null>(null);
   const scrubStartedRef = useRef(false);
 
   useEffect(
@@ -120,6 +129,7 @@ export function useTimelineScrubber({
       scrubAutoScrollFrameRef.current = 0;
       latestScrubPreviewTimeRef.current = null;
       activeScrubRef.current = null;
+      scrubGeometryRef.current = null;
       scrubStartedRef.current = false;
       scrubbingRef.current = false;
       onShiftSnapActiveChange?.(false);
@@ -127,17 +137,47 @@ export function useTimelineScrubber({
     [],
   );
 
+  function readScrubGeometry(forceMeasure = false) {
+    if (!forceMeasure && scrubGeometryRef.current) {
+      return scrubGeometryRef.current;
+    }
+    const timeline = timelineRef.current;
+    const viewport = viewportRef.current;
+    if (!timeline || !viewport) return null;
+    const timelineRect = timeline.getBoundingClientRect();
+    const viewportRect = viewport.getBoundingClientRect();
+    const geometry: ScrubGeometry = {
+      timelineLeft: timelineRect.left,
+      timelineWidth: timelineRect.width,
+      viewportLeft: viewportRect.left,
+      viewportRight: viewportRect.right,
+      viewportScrollLeft: viewport.scrollLeft,
+    };
+    scrubGeometryRef.current = geometry;
+    return geometry;
+  }
+
+  function getTimelineLeft(geometry: ScrubGeometry) {
+    const viewport = viewportRef.current;
+    if (!viewport) return geometry.timelineLeft;
+    return (
+      geometry.timelineLeft -
+      (viewport.scrollLeft - geometry.viewportScrollLeft)
+    );
+  }
+
   function timeFromClientX(clientX: number, snap: boolean) {
-    const rect = timelineRef.current?.getBoundingClientRect();
-    if (!rect || duration <= 0 || displayDuration <= 0) return 0;
+    const geometry = readScrubGeometry();
+    if (!geometry || duration <= 0 || displayDuration <= 0) return 0;
     const rawTime = clamp(
-      ((clientX - rect.left) / rect.width) * displayDuration,
+      ((clientX - getTimelineLeft(geometry)) / geometry.timelineWidth) *
+        displayDuration,
       0,
       duration,
     );
     if (!snap || snapBoundaries.length === 0) return rawTime;
 
-    const pixelsPerSecond = rect.width / displayDuration;
+    const pixelsPerSecond = geometry.timelineWidth / displayDuration;
     const snapThresholdSeconds = Math.min(
       0.35,
       Math.max(0.05, 10 / pixelsPerSecond),
@@ -150,10 +190,9 @@ export function useTimelineScrubber({
   }
 
   function visibleScrubClientX(clientX: number) {
-    const viewport = viewportRef.current;
-    if (!viewport) return clientX;
-    const rect = viewport.getBoundingClientRect();
-    return clamp(clientX, rect.left, rect.right);
+    const geometry = readScrubGeometry();
+    if (!geometry) return clientX;
+    return clamp(clientX, geometry.viewportLeft, geometry.viewportRight);
   }
 
   function previewScrubTime(time: number) {
@@ -260,7 +299,11 @@ export function useTimelineScrubber({
   }
 
   function getTimelineEdgeScrollDelta(clientX: number, viewport: HTMLElement) {
-    const rect = viewport.getBoundingClientRect();
+    const geometry =
+      viewport === viewportRef.current ? readScrubGeometry() : null;
+    const rect = geometry
+      ? { left: geometry.viewportLeft, right: geometry.viewportRight }
+      : viewport.getBoundingClientRect();
     const edgeSize = 72;
     const leftDistance = rect.left + edgeSize - clientX;
     const rightDistance = clientX - (rect.right - edgeSize);
@@ -337,6 +380,7 @@ export function useTimelineScrubber({
       pointerId: event.pointerId,
       target: event.currentTarget,
     };
+    readScrubGeometry(true);
     scrubStartedRef.current = true;
     onScrubStart();
     scrubFromPointer(event);
@@ -387,6 +431,7 @@ export function useTimelineScrubber({
     // canonical editor state commits after live scrub feedback settles.
     if (finalScrubTime !== null) onScrub(finalScrubTime);
     latestScrubPreviewTimeRef.current = null;
+    scrubGeometryRef.current = null;
     onShiftSnapActiveChange?.(false);
     stopScrubAutoScroll();
     if (wasDragging || scrubStarted) onScrubEnd();

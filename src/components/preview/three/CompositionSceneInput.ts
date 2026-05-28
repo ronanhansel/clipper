@@ -14,6 +14,7 @@ import {
   type LayerShadowDebugImage,
   type LayerShadowDiagnostics,
 } from "./layers/LayerShadowSync";
+import type { CompositionRenderQuality } from "./CompositionRenderer";
 import { SharedCaptureCanvas } from "./SharedCaptureCanvas";
 
 export type CompositionSceneInputOptions = {
@@ -42,7 +43,11 @@ export class CompositionSceneInput {
     part: CompositionClip | null;
     localTime: number;
     sourceElement: Element | null;
-    options: { syncShadows?: boolean; isPlaying?: boolean };
+    options: {
+      syncShadows?: boolean;
+      isPlaying?: boolean;
+      quality?: CompositionRenderQuality;
+    };
   } | null = null;
 
   constructor(options: CompositionSceneInputOptions) {
@@ -132,14 +137,21 @@ export class CompositionSceneInput {
     sourceElement: Element | null,
     renderer: unknown,
     rendererInitialized: boolean,
-    options: { syncShadows?: boolean; isPlaying?: boolean } = {},
+    options: {
+      syncShadows?: boolean;
+      isPlaying?: boolean;
+      quality?: CompositionRenderQuality;
+    } = {},
   ) {
     this.lastComposition = { part, localTime, sourceElement, options };
     if (sourceElement !== this.sourceElement) {
       this.sourceElement = sourceElement;
       this.sharedCapture.prepare(sourceElement);
     }
-    this.layerSync.sync(part, localTime, { isPlaying: options.isPlaying });
+    const layerResult = this.layerSync.sync(part, localTime, {
+      isPlaying: options.isPlaying,
+      quality: options.quality,
+    });
     if (!rendererInitialized) {
       this.layerSync.applyShadow(this.shadowSync.getState());
       return;
@@ -153,6 +165,7 @@ export class CompositionSceneInput {
       localTime,
       renderer,
       this.layerSync.group,
+      layerResult,
     );
     this.layerSync.applyShadow(shadow);
   }
