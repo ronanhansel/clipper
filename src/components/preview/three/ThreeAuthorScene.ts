@@ -19,6 +19,7 @@ import {
   type CameraPathData,
   type CameraPathHandle,
 } from "./cameraPathOverlay";
+import { ConnectedPivotGizmo } from "./ConnectedPivotGizmo";
 import { FrustumOutline } from "./FrustumOutline";
 
 const DEG_TO_RAD = Math.PI / 180;
@@ -101,6 +102,35 @@ function pruneGizmoHandles(controls: any, mode: string, names: string[]) {
     for (const child of removed) {
       group.remove(child);
       (child as { geometry?: { dispose?: () => void } }).geometry?.dispose?.();
+    }
+  }
+}
+
+const TRANSLATE_AXIS_INDEX: Record<string, 0 | 1 | 2> = { X: 0, Y: 1, Z: 2 };
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function pruneNegativeTranslateHandles(controls: any) {
+  const targets = [
+    controls._gizmo?.gizmo?.translate,
+    controls._gizmo?.picker?.translate,
+  ];
+  for (const group of targets) {
+    if (!group) continue;
+    const removed = group.children.filter((child: any) => {
+      const axisIndex = TRANSLATE_AXIS_INDEX[child.name];
+      if (axisIndex == null || !child.geometry) return false;
+      child.geometry.computeBoundingBox?.();
+      const box = child.geometry.boundingBox;
+      if (!box) return false;
+      return (
+        (box.min.getComponent(axisIndex) + box.max.getComponent(axisIndex)) /
+          2 <
+        0
+      );
+    });
+    for (const child of removed) {
+      group.remove(child);
+      child.geometry?.dispose?.();
     }
   }
 }
@@ -276,34 +306,6 @@ function findCameraVisualGroup(root: any, objectId: string) {
 }
 
 /**
- * Raycast the picker mesh of a `TransformControls` instance and return
- * the closest hit distance, or `null` if no hit. Used by the
- * capture-phase mutex to pick the closer of two overlapping gizmos so
- * only one drag starts per pointerdown.
- *
- * The picker mesh `_gizmo.picker[mode]` carries the invisible hover /
- * pick volumes for the current mode. Its world matrix is updated by
- * `TransformControls.updateMatrixWorld`, which runs every frame, so
- * raycasting it gives the same result the control's own
- * `pointerHover` would compute.
- */
-function pickGizmoDistance(
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  controls: any,
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  raycaster: any,
-): number | null {
-  if (!controls.enabled) return null;
-  const picker = controls._gizmo?.picker?.[controls.mode];
-  if (!picker) return null;
-  const hits = raycaster.intersectObject(picker, true);
-  if (!hits.length) return null;
-  // Filter to handles whose name is on the showX/showY/showZ axes.
-  // Pruned handles have been removed from the picker so they won't hit.
-  return hits[0].distance;
-}
-
-/**
  * `ThreeAuthorScene` is the AE-style 3D author viewport.
  *
  * Two stacked renderers share one camera + scene-graph:
@@ -395,6 +397,7 @@ export class ThreeAuthorScene {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   private cameraBodyGroup: any | null = null;
   private cameraPathOverlay: CameraPathOverlay | null = null;
+  private pivotGizmo: ConnectedPivotGizmo;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   private orbit: any;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -595,9 +598,24 @@ export class ThreeAuthorScene {
       this.requestRender();
     });
 
-    // Two transform controls so the user gets translate arrows AND rotate
-    // rings at the same time. Only one can drag at once; the listeners
-    // are shared so the commit / drag-state callbacks fire identically.
+    this.pivotGizmo = new ConnectedPivotGizmo({
+      camera: this.orbitCamera,
+      canvas: this.canvas,
+      onChange: () => {
+        this.commitGizmoTransformToProps();
+        this.requestRender();
+      },
+      onDragStateChange: (active) => {
+        this.orbit.enabled = !active && this.viewMode === "orbit";
+        if (this.dragStateCallback) this.dragStateCallback(active);
+        this.requestRender();
+      },
+      requestRender: () => this.requestRender(),
+    });
+    this.scene.add(this.pivotGizmo.group);
+
+    // TransformControls still owns translate drag math. Rotation is handled
+    // by ConnectedPivotGizmo so the visible arcs connect to the arrow axes.
     this.translateTransform = new TransformControls(
       this.orbitCamera,
       this.canvas,
@@ -607,19 +625,12 @@ export class ThreeAuthorScene {
     this.translateTransform.setSpace("world");
     this.rotateTransform = new TransformControls(this.orbitCamera, this.canvas);
     this.rotateTransform.setMode("rotate");
-    // Half the translate gizmo's size — the rotation arcs sit at radius
-    // 0.225 in gizmo-local units while the translate arrows extend to
-    // 0.45. Visually and spatially: outer half of each axis line is
-    // translate-only, inner half is rotate-only. Combined with the
-    // capture-phase mutex below, this makes accidental
-    // simultaneous-mode drags impossible.
+    this.rotateTransform.enabled = false;
     this.rotateTransform.setSize(0.45);
     this.rotateTransform.setSpace("world");
-    // Strip extras so each gizmo shows only the three axis bounds:
+    // Strip extras so the translate gizmo shows only the three axis bounds:
     //   - translate: keep X / Y / Z arrows; drop the center octahedron
     //     and the three planar squares (XY / YZ / XZ).
-    //   - rotate: keep X / Y / Z axis arcs; drop the screen-aligned
-    //     gray inner circle (XYZE) and the outer yellow ring (E).
     // The handles live as named children of `_gizmo.gizmo[mode]` and
     // `_gizmo.picker[mode]`. `updateMatrixWorld` rewrites `visible`
     // every frame, so removal is the only durable fix.
@@ -629,7 +640,7 @@ export class ThreeAuthorScene {
       "YZ",
       "XZ",
     ]);
-    pruneGizmoHandles(this.rotateTransform, "rotate", ["XYZE", "E"]);
+    pruneNegativeTranslateHandles(this.translateTransform);
     const wireTransform = (controls: typeof this.translateTransform) => {
       controls.addEventListener(
         "dragging-changed",
@@ -645,62 +656,22 @@ export class ThreeAuthorScene {
       });
     };
     wireTransform(this.translateTransform);
-    wireTransform(this.rotateTransform);
 
-    // Mutex: a single pointerdown can hit pickers on both
-    // TransformControls instances simultaneously (each registers its
-    // own listener, neither knows about the other). Raycast both
-    // pickers in the capture phase and disable the losing gizmo before
-    // its own pointerdown listener fires — `TransformControls`
-    // early-returns on `pointerDown` when `enabled` is false. Re-enable
-    // both gizmos on pointerup / pointercancel.
+    // Re-enable translate after gestures. Rotation is owned by the local
+    // pivot gizmo and must stay disabled on the hidden TransformControls.
     const restoreGizmos = () => {
       this.translateTransform.enabled = !this.handToolActive;
-      this.rotateTransform.enabled = !this.handToolActive;
+      this.rotateTransform.enabled = false;
+      this.pivotGizmo.setEnabled(!this.handToolActive);
     };
-    this.canvas.addEventListener(
-      "pointerdown",
-      (event: PointerEvent) => {
-        if (this.viewMode !== "orbit") return;
-        if (this.handToolActive) return;
-        if (event.button !== 0) return;
-        if (!this.isAttached) return;
-        const rect = this.canvas.getBoundingClientRect();
-        const ndc = {
-          x: ((event.clientX - rect.left) / rect.width) * 2 - 1,
-          y: -((event.clientY - rect.top) / rect.height) * 2 + 1,
-        };
-        this.raycaster.setFromCamera(ndc, this.orbitCamera);
-        const translateHit = pickGizmoDistance(
-          this.translateTransform,
-          this.raycaster,
-        );
-        const rotateHit = pickGizmoDistance(
-          this.rotateTransform,
-          this.raycaster,
-        );
-        if (translateHit == null && rotateHit == null) return;
-        // Closer pick wins; equal-or-only-one cases fall through. The
-        // loser is disabled for this gesture so its pointerdown listener
-        // bails out, then re-enabled on pointerup.
-        if (
-          translateHit != null &&
-          (rotateHit == null || translateHit <= rotateHit)
-        ) {
-          this.rotateTransform.enabled = false;
-        } else {
-          this.translateTransform.enabled = false;
-        }
-      },
-      { capture: true },
-    );
     this.canvas.addEventListener("pointerup", restoreGizmos);
     this.canvas.addEventListener("pointercancel", restoreGizmos);
     // Pick the camera body or a camera-path keyframe/handle on click. A
     // tiny pointermove threshold distinguishes click from orbit drag.
     let downPoint: { x: number; y: number } | null = null;
     let downHitCamera: string | null = null;
-    let downHitObject = false;
+    let downHitObject: string | null = null;
+    let downHitLight: string | null = null;
     let downHitPath: "marker" | "handle" | null = null;
     this.canvas.addEventListener("pointerdown", (event: PointerEvent) => {
       if (this.viewMode !== "orbit") return;
@@ -749,22 +720,13 @@ export class ThreeAuthorScene {
           : null;
       downPoint = { x: event.clientX, y: event.clientY };
       downHitCamera = pickedCameraId;
-      downHitObject = pickedObjectId != null || pickedLightId != null;
+      downHitObject = pickedObjectId;
+      downHitLight = pickedLightId;
       downHitPath = pathPick;
-      if (pickedCameraId) {
-        // Prevent OrbitControls from starting an orbit on the camera body.
-        event.stopPropagation();
-        this.selectCallback?.(pickedCameraId);
-      } else if (pathPick) {
+      if (pathPick) {
         // Suppress OrbitControls on path picks too — clicking a marker
         // or starting a handle drag must not also orbit the scene.
         event.stopPropagation();
-      } else if (pickedObjectId) {
-        event.stopPropagation();
-        this.selectCallback?.(pickedObjectId);
-      } else if (pickedLightId) {
-        event.stopPropagation();
-        this.selectCallback?.(pickedLightId);
       }
     });
     this.canvas.addEventListener("pointerup", (event: PointerEvent) => {
@@ -775,12 +737,30 @@ export class ThreeAuthorScene {
       );
       const wasClick = moved < 4;
       const hitCamera = downHitCamera != null;
-      const hitObject = downHitObject;
+      const pickedCameraId = downHitCamera;
+      const pickedObjectId = downHitObject;
+      const pickedLightId = downHitLight;
+      const hitObject = pickedObjectId != null || pickedLightId != null;
       const hitPath = downHitPath;
       downPoint = null;
       downHitCamera = null;
-      downHitObject = false;
+      downHitObject = null;
+      downHitLight = null;
       downHitPath = null;
+      if (wasClick && this.viewMode === "orbit") {
+        if (pickedCameraId) {
+          this.selectCallback?.(pickedCameraId);
+          return;
+        }
+        if (pickedObjectId) {
+          this.selectCallback?.(pickedObjectId);
+          return;
+        }
+        if (pickedLightId) {
+          this.selectCallback?.(pickedLightId);
+          return;
+        }
+      }
       if (
         wasClick &&
         !hitCamera &&
@@ -795,7 +775,6 @@ export class ThreeAuthorScene {
       }
     });
     this.scene.add(this.translateTransform.getHelper());
-    this.scene.add(this.rotateTransform.getHelper());
 
     // Light haze + grid for orientation. Grid lies flat on the z=0 plane
     // (after the rotation) so it matches the composition plane. The grid
@@ -846,6 +825,7 @@ export class ThreeAuthorScene {
       this.rotateTransform.detach();
       this.isAttached = false;
     }
+    this.syncPivotGizmoTarget();
     this.requestRender();
   }
 
@@ -856,7 +836,8 @@ export class ThreeAuthorScene {
       ? THREE.MOUSE.PAN
       : THREE.MOUSE.ROTATE;
     this.translateTransform.enabled = !active;
-    this.rotateTransform.enabled = !active;
+    this.rotateTransform.enabled = false;
+    this.pivotGizmo.setEnabled(!active);
     this.canvas.style.cursor = active ? "grab" : "";
     this.requestRender();
   }
@@ -888,6 +869,22 @@ export class ThreeAuthorScene {
 
   onViewStateChange(callback: (state: ThreeOrbitState) => void) {
     this.viewStateCallback = callback;
+  }
+
+  private syncPivotGizmoTarget() {
+    const hasSelectedTarget =
+      this.gizmoMode === "object"
+        ? this.selectedObjectGizmoId != null
+        : this.selectedCameraObjectId != null;
+    if (!this.isAttached || this.viewMode !== "orbit" || !hasSelectedTarget) {
+      this.pivotGizmo.setTarget(null);
+      return;
+    }
+    this.pivotGizmo.setTarget(
+      this.gizmoMode === "object"
+        ? this.objectGizmoTarget
+        : this.cameraGizmoTarget,
+    );
   }
 
   setViewport(width: number, height: number) {
@@ -977,6 +974,7 @@ export class ThreeAuthorScene {
       this.translateTransform.detach();
       this.rotateTransform.detach();
       this.isAttached = false;
+      this.syncPivotGizmoTarget();
     }
     this.requestRender();
   }
@@ -1297,6 +1295,7 @@ export class ThreeAuthorScene {
         this.gizmoMode = "camera";
         this.selectedObjectGizmoId = null;
         this.selectedObjectGizmoBounds = null;
+        this.syncPivotGizmoTarget();
         this.requestRender();
       }
       return;
@@ -1316,6 +1315,7 @@ export class ThreeAuthorScene {
       this.translateTransform.attach(this.cameraGizmoTarget);
       this.rotateTransform.attach(this.cameraGizmoTarget);
       this.isAttached = true;
+      this.syncPivotGizmoTarget();
       this.requestRender();
     }
   }
@@ -1431,6 +1431,7 @@ export class ThreeAuthorScene {
         this.isAttached = false;
         this.gizmoMode = "camera";
         this.selectedObjectGizmoId = null;
+        this.syncPivotGizmoTarget();
         this.requestRender();
       }
       return;
@@ -1467,6 +1468,7 @@ export class ThreeAuthorScene {
       this.rotateTransform.attach(this.objectGizmoTarget);
       this.isAttached = true;
     }
+    this.syncPivotGizmoTarget();
     this.requestRender();
   }
 
@@ -1520,6 +1522,7 @@ export class ThreeAuthorScene {
   render() {
     const camera =
       this.viewMode === "through" ? this.throughCamera : this.orbitCamera;
+    this.pivotGizmo.update();
     // Background pass: layer 1 only (grid). Painted into bgCanvas which
     // sits behind the CSS3D layer in the DOM stack.
     camera.layers.set(1);
@@ -1544,6 +1547,8 @@ export class ThreeAuthorScene {
     const rotateHelper = this.rotateTransform.getHelper?.();
     if (rotateHelper && rotateHelper.parent === this.scene)
       this.scene.remove(rotateHelper);
+    this.scene.remove(this.pivotGizmo.group);
+    this.pivotGizmo.dispose();
     this.translateTransform.dispose();
     this.rotateTransform.dispose();
     this.orbit.dispose();
